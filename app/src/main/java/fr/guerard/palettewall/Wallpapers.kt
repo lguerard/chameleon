@@ -23,6 +23,7 @@ object Prefs {
     private const val KEY_LAST_ID = "last_id"
     private const val KEY_ENABLED = "enabled"
     private const val KEY_LOCK_TOO = "lock_too"
+    private const val KEY_ICONS_TOO = "icons_too"
 
     private fun p(c: Context) = c.getSharedPreferences(FILE, Context.MODE_PRIVATE)
 
@@ -34,6 +35,9 @@ object Prefs {
 
     fun lockToo(c: Context) = p(c).getBoolean(KEY_LOCK_TOO, false)
     fun setLockToo(c: Context, v: Boolean) = p(c).edit().putBoolean(KEY_LOCK_TOO, v).apply()
+
+    fun iconsToo(c: Context) = p(c).getBoolean(KEY_ICONS_TOO, true)
+    fun setIconsToo(c: Context, v: Boolean) = p(c).edit().putBoolean(KEY_ICONS_TOO, v).apply()
 
     fun lastChange(c: Context) = p(c).getLong(KEY_LAST_CHANGE, 0L)
     fun lastId(c: Context) = p(c).getLong(KEY_LAST_ID, -1L)

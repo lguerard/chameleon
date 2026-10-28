@@ -55,6 +55,12 @@ class MainActivity : Activity() {
             setOnCheckedChangeListener { _, v -> Prefs.setLockToo(this@MainActivity, v) }
         })
 
+        col.addView(CheckBox(this).apply {
+            text = "Apply the palette to app icons"
+            isChecked = Prefs.iconsToo(this@MainActivity)
+            setOnCheckedChangeListener { _, v -> Prefs.setIconsToo(this@MainActivity, v) }
+        })
+
         col.addView(TextView(this).apply { text = "Minimum minutes between changes" })
         val interval = EditText(this).apply {
             inputType = InputType.TYPE_CLASS_NUMBER

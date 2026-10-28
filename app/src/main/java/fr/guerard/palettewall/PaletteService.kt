@@ -16,22 +16,28 @@ import android.widget.Toast
 /**
  * After each unlock (at most once per interval):
  *  1. sets a random Gallery favourite as the home screen wallpaper,
- *  2. opens Samsung's "Wallpaper and style",
- *  3. taps Colour palette -> wallpaper colours tab -> first palette -> Apply,
- *  4. goes back to the home screen.
+ *  2. opens Samsung's "Wallpaper and style" -> Colour palette,
+ *  3. switches the palette OFF and taps Apply,
+ *  4. switches it back ON, sets "apply to app icons", picks the first
+ *     wallpaper palette and taps Apply,
+ *  5. goes back to the home screen.
+ *
+ * One UI only recomputes the system palette from a wallpaper set by another app
+ * after this off/apply/on/apply round trip.
  *
  * Buttons are found by their resource IDs (from a uiautomator dump on One UI 9),
  * so the flow does not depend on the phone's language.
  */
 class PaletteService : AccessibilityService() {
 
-    private enum class Step { IDLE, OPEN_MAIN, OPEN_PALETTE, PALETTE_RESET, PICK, APPLY }
+    /** NAVIGATE: getting to the palette screen. WAIT: a delayed action is pending. */
+    private enum class Step { IDLE, NAVIGATE, WAIT }
+    private enum class Phase { OFF, ON }
 
     private val main = Handler(Looper.getMainLooper())
     private var step = Step.IDLE
+    private var phase = Phase.OFF
     private var pending: Runnable? = null
-    private var turnedOff = false
-    private var paletteCycled = false
 
     private val unlockReceiver = object : BroadcastReceiver() {
         override fun onReceive(c: Context, i: Intent) {
@@ -43,7 +49,7 @@ class PaletteService : AccessibilityService() {
     }
 
     private val timeout = Runnable {
-        Log.w(TAG, "Palette flow timed out in step $step")
+        Log.w(TAG, "Palette flow timed out (step $step, phase $phase)")
         finish()
     }
 
@@ -66,10 +72,10 @@ class PaletteService : AccessibilityService() {
 
     override fun onInterrupt() {}
 
-    /** Changes the wallpaper and then fixes the palette. */
+    /** Changes the wallpaper and then refreshes the palette. */
     fun runNow() {
         if (step != Step.IDLE) return
-        step = Step.OPEN_MAIN // mark busy while the wallpaper is being set
+        step = Step.WAIT // busy while the wallpaper is being set
         Thread {
             val id = Wallpapers.setRandomFavourite(this)
             main.post {
@@ -83,7 +89,7 @@ class PaletteService : AccessibilityService() {
         }.start()
     }
 
-    /** Only re-applies the palette for the current wallpaper. */
+    /** Only refreshes the palette for the current wallpaper. */
     fun fixPaletteOnly() {
         if (step != Step.IDLE) return
         openWallpaperAndStyle()
@@ -93,11 +99,10 @@ class PaletteService : AccessibilityService() {
         // The "Wallpaper and style" screen Settings opens (it has no launcher entry).
         val launch = Intent().setClassName(DRESSROOM, "$DRESSROOM.presentation.settings.WallpaperSettingActivity")
             .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TASK)
-        step = Step.OPEN_MAIN
-        turnedOff = false
-        paletteCycled = false
+        step = Step.NAVIGATE
+        phase = Phase.OFF
         main.removeCallbacks(timeout)
-        main.postDelayed(timeout, 20_000)
+        main.postDelayed(timeout, 30_000)
         try {
             startActivity(launch)
         } catch (e: Exception) {
@@ -109,8 +114,7 @@ class PaletteService : AccessibilityService() {
     }
 
     override fun onAccessibilityEvent(event: AccessibilityEvent?) {
-        if (step == Step.IDLE || event?.packageName?.toString() != DRESSROOM) return
-        if (step == Step.APPLY) return // handled by its own delayed check
+        if (step != Step.NAVIGATE || event?.packageName?.toString() != DRESSROOM) return
         // Wait until the screen stops changing before acting.
         schedule(350) { advance() }
     }
@@ -122,77 +126,85 @@ class PaletteService : AccessibilityService() {
         main.postDelayed(r, delayMs)
     }
 
+    /** Runs [block] after [delayMs], ignoring screen events in the meantime. */
+    private fun later(delayMs: Long, block: () -> Unit) {
+        step = Step.WAIT
+        schedule(delayMs) { step = Step.NAVIGATE; block() }
+    }
+
     private fun advance() {
+        if (step != Step.NAVIGATE) return
         val root = rootInActiveWindow ?: return
         if (root.packageName?.toString() != DRESSROOM) return
 
         // The palette screen is recognised by its on/off bar, which stays
         // visible even while the palette is switched off.
         val switchBar = byId(root, "color_theme_switch_bar")
-        val paletteContainer = byId(root, "color_palette_container")
-
-        when {
+        if (switchBar == null) {
             // Main "Wallpaper and style" screen: open Colour palette.
-            switchBar == null && (step == Step.OPEN_MAIN || step == Step.OPEN_PALETTE) -> {
-                val entry = byId(root, "color_icon") ?: return
-                if (clickUp(entry)) step = Step.OPEN_PALETTE
+            byId(root, "color_icon")?.let { clickUp(it) }
+            return
+        }
+        val paletteToggle = byId(switchBar, "switch_toggle") ?: return
+
+        when (phase) {
+            Phase.OFF -> {
+                if (paletteToggle.isChecked) {
+                    clickUp(paletteToggle)
+                    later(800) { advance() }
+                } else {
+                    later(300) {
+                        pressApply("palette off")
+                        phase = Phase.ON
+                        // Apply may close the screen; advance() re-enters it if so.
+                        later(1500) { advance() }
+                    }
+                }
             }
 
-            switchBar != null && (step == Step.OPEN_MAIN || step == Step.OPEN_PALETTE) -> {
-                val toggle = firstById(switchBar, "switch_toggle") ?: return
-                // One UI only re-reads the new wallpaper's colours when the palette
-                // is switched off and on again, so always cycle it once.
-                if (!paletteCycled) {
-                    if (toggle.isChecked && !turnedOff) {
-                        clickUp(toggle); turnedOff = true
-                        schedule(700) { advance() }
-                        return
-                    }
-                    if (!toggle.isChecked) {
-                        clickUp(toggle); paletteCycled = true
-                        schedule(900) { advance() }
-                        return
-                    }
-                }
-                if (!toggle.isChecked) {
-                    clickUp(toggle)
-                    schedule(700) { advance() }
+            Phase.ON -> {
+                if (!paletteToggle.isChecked) {
+                    clickUp(paletteToggle)
+                    later(900) { advance() }
                     return
                 }
-                if (paletteContainer == null) return // list not shown yet
+                // "Apply palette to app icons", as chosen in the app.
+                val iconToggle = byId(root, "switch_app_icon")?.let { byId(it, "switch_toggle") }
+                if (iconToggle != null && iconToggle.isChecked != Prefs.iconsToo(this)) {
+                    clickUp(iconToggle)
+                    later(600) { advance() }
+                    return
+                }
+                val container = byId(root, "color_palette_container") ?: return
                 // The first tab is "wallpaper colours" (the second is "basic colours").
                 val firstTab = byId(root, "color_list_tab_layout")?.getChild(0)?.getChild(0)
                 if (firstTab != null && !firstTab.isSelected) {
                     clickUp(firstTab)
-                    schedule(700) { advance() }
+                    later(700) { advance() }
                     return
                 }
-                // Make sure the first page of palettes is showing.
-                paletteContainer.performAction(AccessibilityNodeInfo.ACTION_SCROLL_BACKWARD)
-                step = Step.PALETTE_RESET
-                schedule(500) { advance() }
-            }
-
-            paletteContainer != null && step == Step.PALETTE_RESET -> {
-                val first = firstClickable(paletteContainer) ?: return
-                first.performAction(AccessibilityNodeInfo.ACTION_CLICK)
-                step = Step.APPLY
-                main.postDelayed({ apply() }, 800)
+                // Show the first page of palettes, then pick the first one and apply.
+                container.performAction(AccessibilityNodeInfo.ACTION_SCROLL_BACKWARD)
+                later(500) {
+                    val fresh = rootInActiveWindow?.let { byId(it, "color_palette_container") }
+                    fresh?.let { firstClickable(it) }?.performAction(AccessibilityNodeInfo.ACTION_CLICK)
+                    later(800) {
+                        pressApply("palette on")
+                        later(1200) { finish() }
+                    }
+                }
             }
         }
     }
 
-    private fun apply() {
-        val root = rootInActiveWindow
-        val button = root?.let { byId(it, "bottom_button") }
+    private fun pressApply(label: String) {
+        val button = rootInActiveWindow?.let { byId(it, "bottom_button") }
         if (button != null && button.isEnabled) {
             button.performAction(AccessibilityNodeInfo.ACTION_CLICK)
-            Log.i(TAG, "Palette applied")
+            Log.i(TAG, "Applied ($label)")
         } else {
-            // Already the selected palette: nothing to apply.
-            Log.i(TAG, "Apply not enabled, palette unchanged")
+            Log.i(TAG, "Apply not enabled ($label)")
         }
-        main.postDelayed({ finish() }, 1200)
     }
 
     private fun finish() {
@@ -204,10 +216,9 @@ class PaletteService : AccessibilityService() {
 
     // --- node helpers -------------------------------------------------------
 
-    private fun byId(root: AccessibilityNodeInfo, id: String): AccessibilityNodeInfo? =
-        root.findAccessibilityNodeInfosByViewId("$DRESSROOM:id/$id").firstOrNull()
-
-    private fun firstById(node: AccessibilityNodeInfo, id: String) = byId(node, id)
+    /** First node with this dressroom resource ID inside [node]'s subtree. */
+    private fun byId(node: AccessibilityNodeInfo, id: String): AccessibilityNodeInfo? =
+        node.findAccessibilityNodeInfosByViewId("$DRESSROOM:id/$id").firstOrNull()
 
     /** Clicks the node, or its nearest clickable ancestor. */
     private fun clickUp(node: AccessibilityNodeInfo): Boolean {
