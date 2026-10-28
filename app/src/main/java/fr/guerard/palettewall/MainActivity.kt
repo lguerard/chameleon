@@ -2,93 +2,126 @@ package fr.guerard.palettewall
 
 import android.Manifest
 import android.app.Activity
+import android.content.ClipData
+import android.content.ClipboardManager
 import android.content.Intent
 import android.content.pm.PackageManager
+import android.content.res.Configuration
+import android.graphics.Color
+import android.graphics.Typeface
+import android.graphics.drawable.GradientDrawable
 import android.os.Build
 import android.os.Bundle
 import android.provider.Settings
 import android.text.InputType
+import android.view.Gravity
 import android.view.ViewGroup
 import android.widget.Button
-import android.widget.CheckBox
 import android.widget.EditText
 import android.widget.LinearLayout
 import android.widget.ScrollView
+import android.widget.Switch
 import android.widget.TextView
 import android.widget.Toast
 
 class MainActivity : Activity() {
 
-    private lateinit var status: TextView
+    private val dp by lazy { resources.displayMetrics.density }
+    private fun px(v: Int) = (v * dp).toInt()
+
+    private val dark by lazy {
+        resources.configuration.uiMode and Configuration.UI_MODE_NIGHT_MASK == Configuration.UI_MODE_NIGHT_YES
+    }
+    private val bg by lazy { if (dark) 0xFF101414.toInt() else 0xFFF3F6F4.toInt() }
+    private val card by lazy { if (dark) 0xFF1C2222.toInt() else Color.WHITE }
+    private val fg by lazy { if (dark) 0xFFE6EAE8.toInt() else 0xFF1A1F1D.toInt() }
+    private val subtext by lazy { if (dark) 0xFF9AA5A1.toInt() else 0xFF5F6B67.toInt() }
+    private val accent by lazy {
+        if (Build.VERSION.SDK_INT >= 31)
+            getColor(if (dark) android.R.color.system_accent1_200 else android.R.color.system_accent1_600)
+        else 0xFF1E9E7A.toInt()
+    }
+    private val ok = 0xFF43A047.toInt()
+    private val bad = 0xFFE53935.toInt()
+
+    private lateinit var setup: LinearLayout
 
     private val mediaPermission =
         if (Build.VERSION.SDK_INT >= 33) Manifest.permission.READ_MEDIA_IMAGES
         else Manifest.permission.READ_EXTERNAL_STORAGE
 
+    private val grantCommand =
+        "adb shell pm grant fr.guerard.palettewall android.permission.WRITE_SECURE_SETTINGS"
+
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
-        val pad = (16 * resources.displayMetrics.density).toInt()
-
         val col = LinearLayout(this).apply {
             orientation = LinearLayout.VERTICAL
-            setPadding(pad, pad * 3, pad, pad)
+            setPadding(px(16), px(48), px(16), px(24))
         }
 
-        status = TextView(this).apply { textSize = 16f; setPadding(0, 0, 0, pad) }
-        col.addView(status)
-
-        col.addView(button("1. Allow photo access (choose \"Allow all\")") {
-            requestPermissions(arrayOf(mediaPermission), 1)
+        col.addView(TextView(this).apply {
+            this.text = "Chameleon 🦎"
+            textSize = 30f
+            setTypeface(null, Typeface.BOLD)
+            setTextColor(accent)
         })
-        col.addView(button("2. Turn on the accessibility service") {
-            startActivity(Intent(Settings.ACTION_ACCESSIBILITY_SETTINGS))
-        })
-
-        col.addView(CheckBox(this).apply {
-            text = "Change automatically (picture at screen off, colours at unlock)"
-            isChecked = Prefs.enabled(this@MainActivity)
-            setOnCheckedChangeListener { _, v -> Prefs.setEnabled(this@MainActivity, v) }
-        })
-        col.addView(CheckBox(this).apply {
-            text = "Also set the lock screen"
-            isChecked = Prefs.lockToo(this@MainActivity)
-            setOnCheckedChangeListener { _, v -> Prefs.setLockToo(this@MainActivity, v) }
+        col.addView(TextView(this).apply {
+            this.text = "Your Gallery favourites, with matching system colours."
+            textSize = 14f
+            setTextColor(subtext)
+            setPadding(0, px(2), 0, px(8))
         })
 
-        col.addView(CheckBox(this).apply {
-            text = "Apply the palette to app icons"
-            isChecked = Prefs.iconsToo(this@MainActivity)
-            setOnCheckedChangeListener { _, v -> Prefs.setIconsToo(this@MainActivity, v) }
-        })
+        setup = section(col, "Setup")
 
-        col.addView(CheckBox(this).apply {
-            text = "Hide Wallpaper and style while the colours update"
-            isChecked = Prefs.hideFlash(this@MainActivity)
-            setOnCheckedChangeListener { _, v -> Prefs.setHideFlash(this@MainActivity, v) }
-        })
+        val options = section(col, "Behaviour")
+        options.addView(switchRow(
+            "Change automatically",
+            "Picture at screen off, colours at unlock",
+            Prefs.enabled(this)
+        ) { Prefs.setEnabled(this, it) })
+        options.addView(switchRow(
+            "Also set the lock screen", null, Prefs.lockToo(this)
+        ) { Prefs.setLockToo(this, it) })
+        options.addView(switchRow(
+            "Apply the palette to app icons", null, Prefs.iconsToo(this)
+        ) { Prefs.setIconsToo(this, it) })
+        options.addView(switchRow(
+            "Hide Wallpaper and style",
+            "Cover the screen with the new picture while colours update",
+            Prefs.hideFlash(this)
+        ) { Prefs.setHideFlash(this, it) })
 
-        col.addView(TextView(this).apply { text = "Minimum minutes between changes" })
         val interval = EditText(this).apply {
             inputType = InputType.TYPE_CLASS_NUMBER
             setText(Prefs.intervalMinutes(this@MainActivity).toString())
+            setTextColor(fg)
+            gravity = Gravity.CENTER
+            layoutParams = LinearLayout.LayoutParams(px(80), ViewGroup.LayoutParams.WRAP_CONTENT)
         }
-        col.addView(interval)
-        col.addView(button("Save interval") {
-            val v = interval.text.toString().toIntOrNull()
-            if (v == null || v < 0) toast("Enter a number of minutes")
-            else { Prefs.setIntervalMinutes(this, v); toast("Saved") }
-        })
+        val intervalRow = row().apply {
+            addView(label("Minimum minutes between changes", null), LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f))
+            addView(interval)
+            addView(smallButton("Save") {
+                val v = interval.text.toString().toIntOrNull()
+                if (v == null || v < 0) toast("Enter a number of minutes")
+                else { Prefs.setIntervalMinutes(this@MainActivity, v); toast("Saved") }
+            })
+        }
+        options.addView(intervalRow)
 
-        col.addView(button("Change wallpaper now") {
+        val actions = section(col, "Actions")
+        actions.addView(bigButton("Change wallpaper now", true) {
             val s = PaletteService.instance
             if (s == null) toast("Turn on the accessibility service first") else s.runNow()
         })
-        col.addView(button("Only re-apply the palette") {
+        actions.addView(bigButton("Only re-apply the palette", false) {
             val s = PaletteService.instance
             if (s == null) toast("Turn on the accessibility service first") else s.refreshPalette()
         })
 
-        setContentView(ScrollView(this).apply { addView(col) })
+        setContentView(ScrollView(this).apply { setBackgroundColor(bg); addView(col) })
     }
 
     override fun onResume() {
@@ -101,29 +134,123 @@ class MainActivity : Activity() {
         refresh()
     }
 
+    /** Rebuilds the setup checklist; tapping a missing item does the fix. */
     private fun refresh() {
+        setup.removeAllViews()
         val hasPhotos = checkSelfPermission(mediaPermission) == PackageManager.PERMISSION_GRANTED
         val favs = if (hasPhotos) runCatching { Wallpapers.favouriteIds(this).size }.getOrDefault(-1) else -1
+        val secure = checkSelfPermission(Manifest.permission.WRITE_SECURE_SETTINGS) == PackageManager.PERMISSION_GRANTED
+
+        setup.addView(statusRow(
+            hasPhotos,
+            if (hasPhotos) "Photo access" else "Allow photo access",
+            if (hasPhotos) (if (favs >= 0) "$favs favourites found" else "Favourites unknown")
+            else "Tap and choose \"Allow all\""
+        ) { if (!hasPhotos) requestPermissions(arrayOf(mediaPermission), 1) })
+
         val service = PaletteService.instance != null
-        status.text = buildString {
-            appendLine(if (hasPhotos) "✓ Photo access" else "✗ Photo access missing")
-            appendLine(if (favs >= 0) "Favourites found: $favs" else "Favourites: unknown")
-            appendLine(if (service) "✓ Accessibility service on" else "✗ Accessibility service off")
-            val secure = checkSelfPermission(android.Manifest.permission.WRITE_SECURE_SETTINGS) ==
-                PackageManager.PERMISSION_GRANTED
-            appendLine(
-                if (secure) "✓ Can open Wallpaper and style"
-                else "✗ Run once on a computer:\nadb shell pm grant $packageName android.permission.WRITE_SECURE_SETTINGS"
-            )
-        }
+        setup.addView(statusRow(
+            service,
+            if (service) "Accessibility service on" else "Turn on the accessibility service",
+            if (service) null else "Tap, then enable Chameleon"
+        ) { if (!service) startActivity(Intent(Settings.ACTION_ACCESSIBILITY_SETTINGS)) })
+
+        setup.addView(statusRow(
+            secure,
+            if (secure) "Can open Wallpaper and style" else "Grant secure settings once",
+            if (secure) null else "Tap to copy the adb command, run it on a computer"
+        ) {
+            if (!secure) {
+                getSystemService(ClipboardManager::class.java)
+                    .setPrimaryClip(ClipData.newPlainText("adb", grantCommand))
+                toast("Command copied")
+            }
+        })
     }
 
-    private fun button(label: String, onClick: () -> Unit) = Button(this).apply {
-        text = label
+    // --- view helpers -------------------------------------------------------
+
+    private fun rounded(color: Int, radius: Int) = GradientDrawable().apply {
+        setColor(color)
+        cornerRadius = radius * dp
+    }
+
+    /** Adds a titled card to [parent] and returns its content column. */
+    private fun section(parent: LinearLayout, title: String): LinearLayout {
+        parent.addView(TextView(this).apply {
+            this.text = title.uppercase()
+            textSize = 12f
+            letterSpacing = 0.1f
+            setTypeface(null, Typeface.BOLD)
+            setTextColor(subtext)
+            setPadding(px(4), px(16), 0, px(6))
+        })
+        val inner = LinearLayout(this).apply {
+            orientation = LinearLayout.VERTICAL
+            background = rounded(card, 20)
+            setPadding(px(16), px(8), px(16), px(8))
+        }
+        parent.addView(inner)
+        return inner
+    }
+
+    private fun row() = LinearLayout(this).apply {
+        orientation = LinearLayout.HORIZONTAL
+        gravity = Gravity.CENTER_VERTICAL
+        setPadding(0, px(8), 0, px(8))
+    }
+
+    private fun label(title: String, subtitle: String?) = LinearLayout(this).apply {
+        orientation = LinearLayout.VERTICAL
+        addView(TextView(context).apply { this.text = title; textSize = 16f; setTextColor(fg) })
+        if (subtitle != null) addView(TextView(context).apply {
+            this.text = subtitle; textSize = 13f; setTextColor(subtext)
+        })
+    }
+
+    private fun switchRow(title: String, subtitle: String?, on: Boolean, onChange: (Boolean) -> Unit) =
+        row().apply {
+            addView(label(title, subtitle), LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f))
+            addView(Switch(context).apply {
+                isChecked = on
+                setOnCheckedChangeListener { _, v -> onChange(v) }
+            })
+        }
+
+    private fun statusRow(good: Boolean, title: String, subtitle: String?, onClick: () -> Unit) =
+        row().apply {
+            addView(TextView(context).apply {
+                this.text = if (good) "✓" else "!"
+                textSize = 14f
+                setTypeface(null, Typeface.BOLD)
+                setTextColor(Color.WHITE)
+                gravity = Gravity.CENTER
+                background = rounded(if (good) ok else bad, 100)
+                layoutParams = LinearLayout.LayoutParams(px(26), px(26)).apply { marginEnd = px(14) }
+            })
+            addView(label(title, subtitle), LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f))
+            setOnClickListener { onClick() }
+        }
+
+    private fun smallButton(label: String, onClick: () -> Unit) = Button(this).apply {
+        this.text = label
         isAllCaps = false
+        setOnClickListener { onClick() }
+    }
+
+    private fun bigButton(label: String, primary: Boolean, onClick: () -> Unit) = Button(this).apply {
+        this.text = label
+        isAllCaps = false
+        textSize = 15f
+        setTextColor(if (primary) (if (dark) Color.BLACK else Color.WHITE) else accent)
+        background = if (primary) rounded(accent, 14) else GradientDrawable().apply {
+            setColor(Color.TRANSPARENT)
+            setStroke(px(2), accent)
+            cornerRadius = 14 * dp
+        }
         layoutParams = LinearLayout.LayoutParams(
-            ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT
-        )
+            ViewGroup.LayoutParams.MATCH_PARENT, px(52)
+        ).apply { topMargin = px(6); bottomMargin = px(6) }
         setOnClickListener { onClick() }
     }
 

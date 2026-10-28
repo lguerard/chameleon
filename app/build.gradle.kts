@@ -12,8 +12,8 @@ android {
         // MediaStore.MediaColumns.IS_FAVORITE needs API 30
         minSdk = 30
         targetSdk = 35
-        versionCode = 1
-        versionName = "0.1"
+        versionCode = 2
+        versionName = "1.0"
     }
 
     signingConfigs {
@@ -28,6 +28,14 @@ android {
     }
 
     buildTypes {
+        // Minified release build, signed with the same stable key as before so it
+        // installs over earlier builds.
+        getByName("release") {
+            isMinifyEnabled = true
+            isShrinkResources = true
+            proguardFiles(getDefaultProguardFile("proguard-android-optimize.txt"))
+            signingConfig = signingConfigs.getByName("stable")
+        }
         getByName("debug") {
             signingConfig = signingConfigs.getByName("stable")
         }

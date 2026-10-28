@@ -13,8 +13,8 @@ ID, so it works whatever the phone's language.
 
 1. Push this repo to GitHub. The *Build APK* workflow runs on every push.
 2. Open the workflow run in the **Actions** tab and download the
-   `chameleon-apk` artifact (a zip containing `app-debug.apk`).
-3. Install it: `adb install -r app-debug.apk` (or copy it to the phone and open it).
+   `chameleon-apk` artifact (a zip containing `app-release.apk`).
+3. Install it: `adb install -r app-release.apk` (or copy it to the phone and open it).
 
 ## Set up
 
