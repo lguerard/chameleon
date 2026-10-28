@@ -13,7 +13,9 @@ import android.graphics.drawable.GradientDrawable
 import android.os.Build
 import android.os.Bundle
 import android.provider.Settings
+import android.text.Editable
 import android.text.InputType
+import android.text.TextWatcher
 import android.view.Gravity
 import android.view.ViewGroup
 import android.view.WindowInsets
@@ -112,16 +114,19 @@ class MainActivity : Activity() {
             setText(Prefs.intervalMinutes(this@MainActivity).toString())
             setTextColor(fg)
             gravity = Gravity.CENTER
+            // Saved as you type; no separate button to forget.
+            addTextChangedListener(object : TextWatcher {
+                override fun afterTextChanged(e: Editable?) {
+                    e?.toString()?.toIntOrNull()?.let { Prefs.setIntervalMinutes(this@MainActivity, it) }
+                }
+                override fun beforeTextChanged(s: CharSequence?, a: Int, b: Int, c: Int) {}
+                override fun onTextChanged(s: CharSequence?, a: Int, b: Int, c: Int) {}
+            })
             layoutParams = LinearLayout.LayoutParams(px(80), ViewGroup.LayoutParams.WRAP_CONTENT)
         }
         val intervalRow = row().apply {
             addView(label("Minimum minutes between changes", null), LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f))
             addView(interval)
-            addView(smallButton("Save") {
-                val v = interval.text.toString().toIntOrNull()
-                if (v == null || v < 0) toast("Enter a number of minutes")
-                else { Prefs.setIntervalMinutes(this@MainActivity, v); toast("Saved") }
-            })
         }
         options.addView(intervalRow)
 
@@ -265,12 +270,6 @@ class MainActivity : Activity() {
             addView(label(title, subtitle), LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f))
             setOnClickListener { onClick() }
         }
-
-    private fun smallButton(label: String, onClick: () -> Unit) = Button(this).apply {
-        this.text = label
-        isAllCaps = false
-        setOnClickListener { onClick() }
-    }
 
     private fun bigButton(label: String, primary: Boolean, onClick: () -> Unit) = Button(this).apply {
         this.text = label

@@ -54,7 +54,7 @@ class PaletteService : AccessibilityService() {
 
     private val screenReceiver = object : BroadcastReceiver() {
         override fun onReceive(c: Context, i: Intent) {
-            Log.i(TAG, "${i.action} (enabled=${Prefs.enabled(c)}, step=$step, due=${Prefs.isDue(c)}, pending=${Prefs.palettePending(c)})")
+            Log.i(TAG, "${i.action} (enabled=${Prefs.enabled(c)}, step=$step, due=${Prefs.isDue(c)} [every ${Prefs.intervalMinutes(c)} min, last ${(System.currentTimeMillis() - Prefs.lastChange(c)) / 60_000} min ago], pending=${Prefs.palettePending(c)})")
             if (!Prefs.enabled(c) || step != Step.IDLE) return
             when (i.action) {
                 // Change the picture while nobody is looking.
@@ -175,8 +175,7 @@ class PaletteService : AccessibilityService() {
                 clickUp(toggle)
                 waitFor({ paletteToggle(it)?.isChecked == false }) { advance() }
             } else {
-                waitFor({ applyEnabled(it) }) {
-                    pressApply("palette off")
+                applyWhenReady("palette off", 1500) {
                     phase = Phase.ON
                     // Done when the change is saved (Apply greys out) or the screen closes.
                     waitFor({ !applyEnabled(it) || switchBar(it) == null }, 2500) { advance() }
@@ -225,12 +224,11 @@ class PaletteService : AccessibilityService() {
                 waitFor({ colour1(it) != null }, 4000) { found ->
                     val first = root()?.let { colour1(it) }
                     Log.i(TAG, "Colour 1 found=$found, clicked=${first?.performAction(AccessibilityNodeInfo.ACTION_CLICK)}")
-                    waitFor({ applyEnabled(it) }, 2500) { ok ->
-                        val applied = ok && pressApply("palette on")
-                        waitFor({ !applyEnabled(it) || switchBar(it) == null }, 2500) {
-                            // Only count it as done if Apply was really pressed; otherwise
+                    applyWhenReady("palette on") { applied ->
+                        waitFor({ !applyEnabled(it) || switchBar(it) == null }, 2500) { saved ->
+                            // Only done if Apply was pressed and it took effect; otherwise
                             // the palette stays pending and the next unlock retries.
-                            finish(success = applied)
+                            finish(success = applied && saved)
                         }
                     }
                 }
@@ -238,13 +236,21 @@ class PaletteService : AccessibilityService() {
         }
     }
 
-    /** Presses Apply if it is enabled; returns whether the click was sent. */
-    private fun pressApply(label: String): Boolean {
-        val button = root()?.let { byId(it, "bottom_button") }
-        val sent = button != null && button.isEnabled &&
-            button.performAction(AccessibilityNodeInfo.ACTION_CLICK)
-        Log.i(TAG, if (sent) "Applied ($label)" else "Apply not enabled ($label)")
-        return sent
+    /**
+     * Retries until Apply is enabled and the click is accepted (the node can be
+     * stale or flicker right after a change), then reports whether it was sent.
+     */
+    private fun applyWhenReady(label: String, maxMs: Long = 2500, then: (Boolean) -> Unit) {
+        var sent = false
+        waitFor({ root ->
+            sent = byId(root, "bottom_button")?.let {
+                it.isEnabled && it.performAction(AccessibilityNodeInfo.ACTION_CLICK)
+            } == true
+            sent
+        }, maxMs) {
+            Log.i(TAG, if (sent) "Applied ($label)" else "Apply not pressed ($label)")
+            then(sent)
+        }
     }
 
     private fun finish(success: Boolean) {
