@@ -57,11 +57,13 @@ class PaletteService : AccessibilityService() {
     private var refreshWhenReady = false
     private val hideRunnable = Runnable { hideOverlay() }
     private var lastAttempt = 0L
+    private val startPalette = Runnable { refreshPalette() }
     private var lastNote = ""
 
     private val screenReceiver = object : BroadcastReceiver() {
         override fun onReceive(c: Context, i: Intent) {
             Log.i(TAG, "${i.action} (enabled=${Prefs.enabled(c)}, step=$step, due=${Prefs.isDue(c)} [every ${Prefs.intervalMinutes(c)} min, last ${(System.currentTimeMillis() - Prefs.lastChange(c)) / 60_000} min ago], pending=${Prefs.palettePending(c)})")
+            if (i.action == Intent.ACTION_SCREEN_OFF) main.removeCallbacks(startPalette)
             // Screen turned off mid-flow: give up and never leave the cover up.
             if (i.action == Intent.ACTION_SCREEN_OFF && step != Step.IDLE) {
                 Log.w(TAG, "Screen off during the flow: aborting")
@@ -80,7 +82,7 @@ class PaletteService : AccessibilityService() {
                     // A failed run is retried at most every RETRY_MS, so a stuck
                     // flow can't cover the screen at every unlock.
                     Prefs.palettePending(c) ->
-                        if (System.currentTimeMillis() - lastAttempt >= RETRY_MS) main.postDelayed({ refreshPalette() }, 400)
+                        if (System.currentTimeMillis() - lastAttempt >= RETRY_MS) main.postDelayed(startPalette, UNLOCK_SETTLE_MS)
                     Prefs.isDue(c) -> main.postDelayed({ runNow() }, 400)
                 }
             }
@@ -483,6 +485,12 @@ class PaletteService : AccessibilityService() {
         /** How long the cover stays up after a successful run (ponytail: tune on the phone). */
         const val ICONS_SETTLE_MS = 1800L
         /** A normal run takes about 6 s; past this the flow is stuck. */
+        /**
+         * After a picture set at screen off, wait this long after unlock before the palette
+         * flow: right away, One UI's colour suggestions were still the old picture's.
+         * Tune on the phone.
+         */
+        const val UNLOCK_SETTLE_MS = 6_000L
         const val FLOW_TIMEOUT_MS = 15_000L
         const val RETRY_MS = 10 * 60_000L
         const val DRESSROOM = "com.samsung.android.app.dressroom"
