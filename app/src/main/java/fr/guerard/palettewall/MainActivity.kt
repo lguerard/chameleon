@@ -18,6 +18,7 @@ import android.view.Gravity
 import android.view.ViewGroup
 import android.widget.Button
 import android.widget.EditText
+import android.widget.ImageView
 import android.widget.LinearLayout
 import android.widget.ScrollView
 import android.widget.Switch
@@ -60,17 +61,29 @@ class MainActivity : Activity() {
             setPadding(px(16), px(48), px(16), px(24))
         }
 
-        col.addView(TextView(this).apply {
-            this.text = "Chameleon 🦎"
-            textSize = 30f
-            setTypeface(null, Typeface.BOLD)
-            setTextColor(accent)
-        })
-        col.addView(TextView(this).apply {
-            this.text = "Your Gallery favourites, with matching system colours."
-            textSize = 14f
-            setTextColor(subtext)
-            setPadding(0, px(2), 0, px(8))
+        col.addView(LinearLayout(this).apply {
+            orientation = LinearLayout.HORIZONTAL
+            gravity = Gravity.CENTER_VERTICAL
+            addView(ImageView(context).apply {
+                setImageResource(R.drawable.logo)
+                background = rounded(card, 18)
+                clipToOutline = true // rounded corners from the background shape
+                layoutParams = LinearLayout.LayoutParams(px(72), px(72)).apply { marginEnd = px(14) }
+            })
+            addView(LinearLayout(context).apply {
+                orientation = LinearLayout.VERTICAL
+                addView(TextView(context).apply {
+                    this.text = "Chameleon"
+                    textSize = 30f
+                    setTypeface(null, Typeface.BOLD)
+                    setTextColor(accent)
+                })
+                addView(TextView(context).apply {
+                    this.text = "Your Gallery favourites, with matching system colours."
+                    textSize = 14f
+                    setTextColor(subtext)
+                })
+            }, LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f))
         })
 
         setup = section(col, "Setup")
