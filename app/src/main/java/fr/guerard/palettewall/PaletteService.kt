@@ -49,6 +49,7 @@ class PaletteService : AccessibilityService() {
     private var phase = Phase.OFF
     private var pending: Runnable? = null
     private var overlay: View? = null
+    private val hideRunnable = Runnable { hideOverlay() }
 
     private val screenReceiver = object : BroadcastReceiver() {
         override fun onReceive(c: Context, i: Intent) {
@@ -235,8 +236,9 @@ class PaletteService : AccessibilityService() {
         step = Step.IDLE
         if (success) Prefs.setPalettePending(this, false)
         performGlobalAction(GLOBAL_ACTION_HOME)
-        // Give the home screen a moment to draw before uncovering it.
-        main.postDelayed({ hideOverlay() }, 350)
+        // One UI re-themes the home screen icons a moment after Apply; keep the
+        // cover up until that has finished so the icons don't change in patches.
+        main.postDelayed(hideRunnable, if (success) ICONS_SETTLE_MS else 350)
     }
 
     // --- timing -------------------------------------------------------------
@@ -281,6 +283,7 @@ class PaletteService : AccessibilityService() {
 
     /** Covers the screen with the new wallpaper while the taps run underneath. */
     private fun showOverlay() {
+        main.removeCallbacks(hideRunnable) // a new run cancels a pending hide
         if (overlay != null) return
         val view = FrameLayout(this).apply { setBackgroundColor(Color.BLACK) }
         val preview = Wallpapers.previewFile(this)
@@ -366,6 +369,8 @@ class PaletteService : AccessibilityService() {
     }
 
     companion object {
+        /** How long the cover stays up after a successful run (ponytail: tune on the phone). */
+        const val ICONS_SETTLE_MS = 1800L
         const val DRESSROOM = "com.samsung.android.app.dressroom"
         var instance: PaletteService? = null
             private set
