@@ -215,15 +215,20 @@ class PaletteService : AccessibilityService() {
 
         when (phase) {
             Phase.OFF -> if (toggle.isChecked) {
+                Log.i(TAG, "Palette switch on: turning it off")
                 clickUp(toggle)
                 turnedOff = true
                 waitFor({ paletteToggle(it)?.isChecked == false }) { advance() }
             } else {
-                applyWhenReady("palette off", 1500) { applied ->
-                    // Without this Apply the round trip doesn't recompute anything:
-                    // try again rather than go on (the timeout ends a hopeless run).
-                    // If it was already off when we arrived, there is nothing to apply.
-                    if (!applied && turnedOff) { advance(); return@applyWhenReady }
+                if (!turnedOff) Log.i(TAG, "Palette switch already off")
+                applyWhenReady("palette off", 4000) { applied ->
+                    // Without this Apply the round trip doesn't recompute anything,
+                    // so try again while Apply is there to press (the timeout ends a
+                    // hopeless run). If it stays greyed out, One UI has nothing to
+                    // save: go on.
+                    if (!applied && turnedOff && root()?.let { applyEnabled(it) } == true) {
+                        advance(); return@applyWhenReady
+                    }
                     phase = Phase.ON
                     // Done when the change is saved (Apply greys out) or the screen closes.
                     waitFor({ !applyEnabled(it) || switchBar(it) == null }, 2500) { advance() }
@@ -274,6 +279,7 @@ class PaletteService : AccessibilityService() {
                     Log.i(TAG, "Colour 1 found=$found, clicked=${first?.performAction(AccessibilityNodeInfo.ACTION_CLICK)}")
                     applyWhenReady("palette on") { applied ->
                         waitFor({ !applyEnabled(it) || switchBar(it) == null }, 2500) { saved ->
+                            Log.i(TAG, "Palette run done: applied=$applied, saved=$saved")
                             // Only done if Apply was pressed and it took effect; otherwise
                             // the palette stays pending and the next unlock retries.
                             finish(success = applied && saved)
@@ -290,13 +296,18 @@ class PaletteService : AccessibilityService() {
      */
     private fun applyWhenReady(label: String, maxMs: Long = 2500, then: (Boolean) -> Unit) {
         var sent = false
+        var state = "not found"
         waitFor({ root ->
-            sent = byId(root, "bottom_button")?.let {
-                it.isEnabled && it.performAction(AccessibilityNodeInfo.ACTION_CLICK)
-            } == true
+            val button = byId(root, "bottom_button")
+            state = when {
+                button == null -> "not found"
+                !button.isEnabled -> "greyed out"
+                else -> "click refused"
+            }
+            sent = button?.let { it.isEnabled && it.performAction(AccessibilityNodeInfo.ACTION_CLICK) } == true
             sent
         }, maxMs) {
-            Log.i(TAG, if (sent) "Applied ($label)" else "Apply not pressed ($label)")
+            Log.i(TAG, if (sent) "Applied ($label)" else "Apply not pressed ($label): $state")
             then(sent)
         }
     }
