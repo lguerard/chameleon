@@ -16,6 +16,7 @@ import android.provider.Settings
 import android.text.InputType
 import android.view.Gravity
 import android.view.ViewGroup
+import android.view.WindowInsets
 import android.widget.Button
 import android.widget.EditText
 import android.widget.ImageView
@@ -58,7 +59,7 @@ class MainActivity : Activity() {
         super.onCreate(savedInstanceState)
         val col = LinearLayout(this).apply {
             orientation = LinearLayout.VERTICAL
-            setPadding(px(16), px(48), px(16), px(24))
+            setPadding(px(16), px(16), px(16), px(24))
         }
 
         col.addView(LinearLayout(this).apply {
@@ -134,7 +135,27 @@ class MainActivity : Activity() {
             if (s == null) toast("Turn on the accessibility service first") else s.refreshPalette()
         })
 
-        setContentView(ScrollView(this).apply { setBackgroundColor(bg); addView(col) })
+        actions.addView(bigButton("Copy debug log", false) {
+            // An app can read its own log lines without adb.
+            val log = runCatching {
+                Runtime.getRuntime().exec(arrayOf("logcat", "-d", "-s", "Chameleon")).inputStream
+                    .bufferedReader().readText().lines().takeLast(120).joinToString("\n")
+            }.getOrDefault("")
+            getSystemService(ClipboardManager::class.java)
+                .setPrimaryClip(ClipData.newPlainText("Chameleon log", log))
+            toast(if (log.isBlank()) "Log is empty" else "Log copied: paste it somewhere")
+        })
+
+        setContentView(ScrollView(this).apply {
+            setBackgroundColor(bg)
+            addView(col)
+            // Edge-to-edge on Android 15: keep content clear of the system bars.
+            setOnApplyWindowInsetsListener { _, insets ->
+                val bars = insets.getInsets(WindowInsets.Type.systemBars())
+                col.setPadding(px(16), bars.top + px(16), px(16), bars.bottom + px(24))
+                insets
+            }
+        })
     }
 
     override fun onResume() {
