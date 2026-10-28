@@ -11,6 +11,7 @@ import android.graphics.PixelFormat
 import android.os.Build
 import android.os.Handler
 import android.os.Looper
+import android.os.PowerManager
 import android.util.Log
 import android.view.Gravity
 import android.view.View
@@ -51,6 +52,7 @@ class PaletteService : AccessibilityService() {
 
     private val screenReceiver = object : BroadcastReceiver() {
         override fun onReceive(c: Context, i: Intent) {
+            Log.i(TAG, "${i.action} (enabled=${Prefs.enabled(c)}, step=$step, due=${Prefs.isDue(c)}, pending=${Prefs.palettePending(c)})")
             if (!Prefs.enabled(c) || step != Step.IDLE) return
             when (i.action) {
                 // Change the picture while nobody is looking.
@@ -93,8 +95,16 @@ class PaletteService : AccessibilityService() {
     override fun onInterrupt() {}
 
     private fun prepareWallpaper() {
+        // The CPU may sleep right after the screen turns off, freezing the decode.
+        val lock = getSystemService(PowerManager::class.java)
+            .newWakeLock(PowerManager.PARTIAL_WAKE_LOCK, "Chameleon:wallpaper")
+        lock.acquire(60_000)
         Thread {
-            if (Wallpapers.setNextFavourite(this) != null) Prefs.setPalettePending(this, true)
+            try {
+                if (Wallpapers.setNextFavourite(this) != null) Prefs.setPalettePending(this, true)
+            } finally {
+                if (lock.isHeld) lock.release()
+            }
         }.start()
     }
 
