@@ -88,17 +88,20 @@ class PaletteService : AccessibilityService() {
     }
 
     private fun openWallpaperAndStyle() {
-        val launch = packageManager.getLaunchIntentForPackage(DRESSROOM)
-        if (launch == null) {
-            step = Step.IDLE
-            Toast.makeText(this, "Palette Wallpaper: Wallpaper and style app not found", Toast.LENGTH_LONG).show()
-            return
-        }
-        launch.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TASK)
+        // The "Wallpaper and style" screen Settings opens (it has no launcher entry).
+        val launch = Intent().setClassName(DRESSROOM, "$DRESSROOM.presentation.settings.WallpaperSettingActivity")
+            .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TASK)
         step = Step.OPEN_MAIN
         main.removeCallbacks(timeout)
         main.postDelayed(timeout, 15_000)
-        startActivity(launch)
+        try {
+            startActivity(launch)
+        } catch (e: Exception) {
+            Log.e(TAG, "Could not open Wallpaper and style", e)
+            main.removeCallbacks(timeout)
+            step = Step.IDLE
+            Toast.makeText(this, "Palette Wallpaper: cannot open Wallpaper and style (${e.javaClass.simpleName})", Toast.LENGTH_LONG).show()
+        }
     }
 
     override fun onAccessibilityEvent(event: AccessibilityEvent?) {
