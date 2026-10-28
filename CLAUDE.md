@@ -42,7 +42,7 @@ makes One UI's colour palette follow each picture.
 ## Build
 
 No local Android SDK assumed. GitHub Actions (`.github/workflows/build.yml`)
-builds the minified release APK with Gradle 8.11.1 / AGP 8.7.3, signed (release too) with the committed
+builds the minified release APK, only on `v*` tag pushes, with Gradle 8.11.1 / AGP 8.7.3, signed (release too) with the committed
 `app/debug.keystore` so updates install over each other. Artifact:
 `chameleon-apk`. Install with `adb install -r app-release.apk`.
 

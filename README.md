@@ -11,12 +11,11 @@ ID, so it works whatever the phone's language.
 
 ## Install
 
-1. Push this repo to GitHub. The *Build APK* workflow runs on every push.
-2. Open the workflow run in the **Actions** tab and download the
-   `chameleon-apk` artifact (a zip containing `chameleon-<version>.apk`).
-3. Or, for a tagged release, push a tag (`git tag v1.0.1 && git push origin v1.0.1`):
-   the workflow publishes a GitHub release with `chameleon-v1.0.1.apk` attached.
-4. Install it: `adb install -r chameleon-<version>.apk` (or copy it to the phone and open it).
+1. Push this repo to GitHub. The *Build APK* workflow runs only when a `v*` tag is pushed.
+2. Cut a release by pushing a tag (`git tag v1.0.1 && git push origin v1.0.1`):
+   the workflow publishes a GitHub release with `chameleon-v1.0.1.apk` attached
+   (also available as the `chameleon-apk` artifact of the run).
+3. Install it: `adb install -r chameleon-<version>.apk` (or copy it to the phone and open it).
 
 ## Set up
 
