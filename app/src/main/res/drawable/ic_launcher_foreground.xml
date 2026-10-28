@@ -3,43 +3,70 @@
     android:height="108dp"
     android:viewportWidth="108"
     android:viewportHeight="108">
-    <!-- branch -->
-    <path
-        android:pathData="M34,83 L92,83"
-        android:strokeColor="#FF5D4037"
-        android:strokeWidth="4"
-        android:strokeLineCap="round" />
-    <!-- legs -->
-    <path
-        android:pathData="M50,70 L47,81 M65,70 L68,81"
-        android:strokeColor="#FF558B2F"
-        android:strokeWidth="5"
-        android:strokeLineCap="round" />
-    <!-- curled tail -->
-    <path
-        android:pathData="M36,62 C26,62 20,70 25,77 C30,83 40,79 38,72 C36,67 29,69 31,73"
-        android:strokeColor="#FF7CB342"
-        android:strokeWidth="5"
-        android:strokeLineCap="round" />
-    <!-- body and head -->
-    <path
-        android:fillColor="#FF9CCC65"
-        android:pathData="M34,60 C34,44 50,36 64,38 C72,39 80,43 84,50 L91,52 L85,58 C81,67 70,73 58,73 C46,73 34,71 34,60 Z" />
-    <!-- palette dots -->
-    <path
-        android:fillColor="#FFFFD740"
-        android:pathData="M48,58 m-4,0 a4,4 0 1,0 8,0 a4,4 0 1,0 -8,0" />
-    <path
-        android:fillColor="#FFFF4081"
-        android:pathData="M58,50 m-4,0 a4,4 0 1,0 8,0 a4,4 0 1,0 -8,0" />
-    <path
-        android:fillColor="#FF40C4FF"
-        android:pathData="M60,64 m-4,0 a4,4 0 1,0 8,0 a4,4 0 1,0 -8,0" />
-    <!-- eye -->
-    <path
-        android:fillColor="#FFFFFFFF"
-        android:pathData="M75,48 m-6,0 a6,6 0 1,0 12,0 a6,6 0 1,0 -12,0" />
-    <path
-        android:fillColor="#FF1B1B1B"
-        android:pathData="M76,48 m-3,0 a3,3 0 1,0 6,0 a3,3 0 1,0 -6,0" />
+    <group android:translateX="-2" android:translateY="2">
+        <!-- curled tail -->
+        <path
+            android:pathData="M72,78 C86,80 91,66 83,62 C75,58 71,68 78,70"
+            android:strokeColor="#FF7CB342"
+            android:strokeWidth="6.5"
+            android:strokeLineCap="round" />
+        <!-- feet -->
+        <path
+            android:fillColor="#FF7CB342"
+            android:pathData="M40,85 m-6,0 a6,3.5 0 1,0 12,0 a6,3.5 0 1,0 -12,0 M68,85 m-6,0 a6,3.5 0 1,0 12,0 a6,3.5 0 1,0 -12,0" />
+        <!-- crest -->
+        <path
+            android:fillColor="#FF7CB342"
+            android:pathData="M42,36 Q54,10 66,36 Z" />
+        <!-- chubby body -->
+        <path
+            android:fillColor="#FF9CCC65"
+            android:pathData="M28,66 a26,20 0 1,0 52,0 a26,20 0 1,0 -52,0" />
+        <!-- belly -->
+        <path
+            android:fillColor="#FFDCEDC8"
+            android:pathData="M38,76 a16,9 0 1,0 32,0 a16,9 0 1,0 -32,0" />
+        <!-- palette spots -->
+        <path
+            android:fillColor="#FFFFD740"
+            android:pathData="M32,72 m-3.5,0 a3.5,3.5 0 1,0 7,0 a3.5,3.5 0 1,0 -7,0" />
+        <path
+            android:fillColor="#FFFF4081"
+            android:pathData="M76,72 m-3.5,0 a3.5,3.5 0 1,0 7,0 a3.5,3.5 0 1,0 -7,0" />
+        <path
+            android:fillColor="#FF40C4FF"
+            android:pathData="M54,82 m-3,0 a3,3 0 1,0 6,0 a3,3 0 1,0 -6,0" />
+        <!-- eye bumps -->
+        <path
+            android:fillColor="#FF8BC34A"
+            android:pathData="M40,37 m-12,0 a12,12 0 1,0 24,0 a12,12 0 1,0 -24,0 M68,37 m-12,0 a12,12 0 1,0 24,0 a12,12 0 1,0 -24,0" />
+        <!-- head -->
+        <path
+            android:fillColor="#FF9CCC65"
+            android:pathData="M54,55 m-25,0 a25,24 0 1,0 50,0 a25,24 0 1,0 -50,0" />
+        <!-- crest spots -->
+        <path
+            android:fillColor="#FFFFD740"
+            android:pathData="M54,26 m-3,0 a3,3 0 1,0 6,0 a3,3 0 1,0 -6,0" />
+        <!-- eyes -->
+        <path
+            android:fillColor="#FFFFFFFF"
+            android:pathData="M40,37 m-8.5,0 a8.5,8.5 0 1,0 17,0 a8.5,8.5 0 1,0 -17,0 M68,37 m-8.5,0 a8.5,8.5 0 1,0 17,0 a8.5,8.5 0 1,0 -17,0" />
+        <path
+            android:fillColor="#FF2B2B2B"
+            android:pathData="M42,38 m-5,0 a5,5 0 1,0 10,0 a5,5 0 1,0 -10,0 M70,38 m-5,0 a5,5 0 1,0 10,0 a5,5 0 1,0 -10,0" />
+        <path
+            android:fillColor="#FFFFFFFF"
+            android:pathData="M44,36 m-2,0 a2,2 0 1,0 4,0 a2,2 0 1,0 -4,0 M72,36 m-2,0 a2,2 0 1,0 4,0 a2,2 0 1,0 -4,0" />
+        <!-- cheeks -->
+        <path
+            android:fillColor="#FFFF8A80"
+            android:pathData="M34,60 m-4.5,0 a4.5,3.5 0 1,0 9,0 a4.5,3.5 0 1,0 -9,0 M74,60 m-4.5,0 a4.5,3.5 0 1,0 9,0 a4.5,3.5 0 1,0 -9,0" />
+        <!-- smile -->
+        <path
+            android:pathData="M46,60 Q54,69 62,60"
+            android:strokeColor="#FF33691E"
+            android:strokeWidth="2.6"
+            android:strokeLineCap="round" />
+    </group>
 </vector>
