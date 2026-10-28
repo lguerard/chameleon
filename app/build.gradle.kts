@@ -12,8 +12,9 @@ android {
         // MediaStore.MediaColumns.IS_FAVORITE needs API 30
         minSdk = 30
         targetSdk = 35
-        versionCode = 2
-        versionName = "1.0"
+        // CI passes these from the git tag (see .github/workflows/build.yml).
+        versionCode = (findProperty("versionCode") as String?)?.toInt() ?: 2
+        versionName = (findProperty("versionName") as String?) ?: "1.0"
     }
 
     signingConfigs {

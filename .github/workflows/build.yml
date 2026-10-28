@@ -2,7 +2,12 @@ name: Build APK
 
 on:
   push:
+    branches: ["**"]
+    tags: ["v*"]
   workflow_dispatch:
+
+permissions:
+  contents: write
 
 jobs:
   build:
@@ -19,10 +24,31 @@ jobs:
         with:
           gradle-version: "8.11.1"
 
+      # v1.2.3 -> versionName 1.2.3, versionCode 10203 (same scheme as popote).
+      - name: Version from tag
+        id: version
+        run: |
+          if [[ "$GITHUB_REF" == refs/tags/v* ]]; then
+            V="${GITHUB_REF_NAME#v}"
+            IFS='.' read -r MA MI PA <<< "$V"
+            echo "args=-PversionName=$V -PversionCode=$(( MA * 10000 + MI * 100 + PA ))" >> "$GITHUB_OUTPUT"
+          fi
+
       - name: Build release APK
-        run: gradle assembleRelease --no-daemon
+        run: gradle assembleRelease --no-daemon ${{ steps.version.outputs.args }}
+
+      - name: Name the APK
+        run: cp app/build/outputs/apk/release/app-release.apk "chameleon-${GITHUB_REF_NAME//\//-}.apk"
 
       - uses: actions/upload-artifact@v4
         with:
           name: chameleon-apk
-          path: app/build/outputs/apk/release/app-release.apk
+          path: chameleon-*.apk
+
+      - name: Publish GitHub release
+        if: startsWith(github.ref, 'refs/tags/v')
+        uses: softprops/action-gh-release@v2
+        with:
+          name: Chameleon ${{ github.ref_name }}
+          generate_release_notes: true
+          files: chameleon-*.apk
