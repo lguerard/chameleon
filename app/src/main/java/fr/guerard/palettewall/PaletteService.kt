@@ -51,17 +51,28 @@ class PaletteService : AccessibilityService() {
     private var overlay: View? = null
     private var iconsCycled = false
     private val hideRunnable = Runnable { hideOverlay() }
+    private var lastAttempt = 0L
+    private var lastNote = ""
 
     private val screenReceiver = object : BroadcastReceiver() {
         override fun onReceive(c: Context, i: Intent) {
             Log.i(TAG, "${i.action} (enabled=${Prefs.enabled(c)}, step=$step, due=${Prefs.isDue(c)} [every ${Prefs.intervalMinutes(c)} min, last ${(System.currentTimeMillis() - Prefs.lastChange(c)) / 60_000} min ago], pending=${Prefs.palettePending(c)})")
+            // Screen turned off mid-flow: give up and never leave the cover up.
+            if (i.action == Intent.ACTION_SCREEN_OFF && step != Step.IDLE) {
+                Log.w(TAG, "Screen off during the flow: aborting")
+                finish(success = false)
+                return
+            }
             if (!Prefs.enabled(c) || step != Step.IDLE) return
             when (i.action) {
                 // Change the picture while nobody is looking.
                 Intent.ACTION_SCREEN_OFF -> if (Prefs.isDue(c)) prepareWallpaper()
                 // Then fix the colours right after unlocking.
                 Intent.ACTION_USER_PRESENT -> when {
-                    Prefs.palettePending(c) -> main.postDelayed({ refreshPalette() }, 400)
+                    // A failed run is retried at most every RETRY_MS, so a stuck
+                    // flow can't cover the screen at every unlock.
+                    Prefs.palettePending(c) ->
+                        if (System.currentTimeMillis() - lastAttempt >= RETRY_MS) main.postDelayed({ refreshPalette() }, 400)
                     Prefs.isDue(c) -> main.postDelayed({ runNow() }, 400)
                 }
             }
@@ -69,7 +80,8 @@ class PaletteService : AccessibilityService() {
     }
 
     private val timeout = Runnable {
-        Log.w(TAG, "Palette flow timed out (phase $phase)")
+        val shown = windows.mapNotNull { it.root?.packageName }.joinToString()
+        Log.w(TAG, "Palette flow timed out (phase $phase, step $step, last '$lastNote', windows: $shown)")
         finish(success = false)
     }
 
@@ -137,8 +149,12 @@ class PaletteService : AccessibilityService() {
         step = Step.NAVIGATE
         phase = Phase.OFF
         iconsCycled = false
+        lastAttempt = System.currentTimeMillis()
+        lastNote = ""
         main.removeCallbacks(timeout)
-        main.postDelayed(timeout, 25_000)
+        main.removeCallbacks(beat)
+        main.postDelayed(beat, 700)
+        main.postDelayed(timeout, FLOW_TIMEOUT_MS)
         if (Prefs.hideFlash(this)) showOverlay()
         try {
             startActivity(launch)
@@ -159,16 +175,20 @@ class PaletteService : AccessibilityService() {
 
     private fun advance() {
         if (step != Step.NAVIGATE) return
-        val root = root() ?: return
+        val root = root()
+        if (root == null) { note("Wallpaper and style not on screen yet"); return }
 
         // The palette screen is recognised by its on/off bar, which stays
         // visible even while the palette is switched off.
         if (switchBar(root) == null) {
             // Main "Wallpaper and style" screen: open Colour palette.
-            byId(root, "color_icon")?.let { clickUp(it) }
+            val icon = byId(root, "color_icon")
+            note(if (icon == null) "Main screen: colour palette entry not found" else "Main screen: opening colour palette")
+            icon?.let { clickUp(it) }
             return
         }
-        val toggle = paletteToggle(root) ?: return
+        val toggle = paletteToggle(root)
+        if (toggle == null) { note("Palette screen: on/off switch not found"); return }
 
         when (phase) {
             Phase.OFF -> if (toggle.isChecked) {
@@ -277,6 +297,20 @@ class PaletteService : AccessibilityService() {
 
     // --- timing -------------------------------------------------------------
 
+    /** Logs a stall reason once per change, and remembers it for the timeout log. */
+    private fun note(msg: String) {
+        if (msg != lastNote) { lastNote = msg; Log.i(TAG, msg) }
+    }
+
+    /** Re-runs the step every 700 ms while the flow is active, in case no screen event arrives. */
+    private val beat = object : Runnable {
+        override fun run() {
+            if (step == Step.IDLE) return
+            if (step == Step.NAVIGATE) advance()
+            main.postDelayed(this, 700)
+        }
+    }
+
     private fun schedule(delayMs: Long, block: () -> Unit) {
         pending?.let { main.removeCallbacks(it) }
         val r = Runnable { block() }
@@ -319,7 +353,11 @@ class PaletteService : AccessibilityService() {
     private fun showOverlay() {
         main.removeCallbacks(hideRunnable) // a new run cancels a pending hide
         if (overlay != null) return
-        val view = FrameLayout(this).apply { setBackgroundColor(Color.BLACK) }
+        val view = FrameLayout(this).apply {
+            setBackgroundColor(Color.BLACK)
+            // Escape hatch: a tap abandons the flow and uncovers the screen.
+            setOnClickListener { Log.i(TAG, "Cancelled by tap"); finish(success = false) }
+        }
         val preview = Wallpapers.previewFile(this)
         if (preview.exists()) {
             view.addView(ImageView(this).apply {
@@ -329,7 +367,7 @@ class PaletteService : AccessibilityService() {
         }
         view.addView(
             TextView(this).apply {
-                text = "Matching colours…"
+                text = "Matching colours…  tap to cancel"
                 setTextColor(Color.WHITE)
                 setShadowLayer(8f, 0f, 0f, Color.BLACK)
                 textSize = 15f
@@ -345,7 +383,6 @@ class PaletteService : AccessibilityService() {
             WindowManager.LayoutParams.MATCH_PARENT,
             WindowManager.LayoutParams.TYPE_ACCESSIBILITY_OVERLAY,
             WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE or
-                WindowManager.LayoutParams.FLAG_NOT_TOUCHABLE or
                 WindowManager.LayoutParams.FLAG_LAYOUT_IN_SCREEN or
                 WindowManager.LayoutParams.FLAG_LAYOUT_NO_LIMITS,
             PixelFormat.OPAQUE
@@ -406,6 +443,9 @@ class PaletteService : AccessibilityService() {
     companion object {
         /** How long the cover stays up after a successful run (ponytail: tune on the phone). */
         const val ICONS_SETTLE_MS = 1800L
+        /** A normal run takes about 6 s; past this the flow is stuck. */
+        const val FLOW_TIMEOUT_MS = 15_000L
+        const val RETRY_MS = 10 * 60_000L
         const val DRESSROOM = "com.samsung.android.app.dressroom"
         var instance: PaletteService? = null
             private set
