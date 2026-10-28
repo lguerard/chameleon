@@ -35,7 +35,7 @@ makes One UI's colour palette follow each picture.
   screen size (One UI ignored crop hints), and mark the palette as pending.
 - Unlock: if pending, run the palette flow behind an accessibility overlay
   showing the new wallpaper; each step polls the screen instead of fixed delays;
-  25 s timeout; then go home and remove the overlay.
+  25 s timeout; then back out of Wallpaper and style (home only as a fallback) and remove the overlay.
 - Options in the app: auto on/off, lock screen too, icons too, hide flash,
   interval; buttons "Change wallpaper now" and "Only re-apply the palette".
 

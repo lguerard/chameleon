@@ -29,7 +29,7 @@ import android.widget.Toast
  * palette, hidden behind an overlay showing the new wallpaper:
  *
  *  Wallpaper and style -> Colour palette ->
- *  switch OFF + Apply -> switch ON, icons option, Colour 1 + Apply -> home.
+ *  switch OFF + Apply -> switch ON, icons option, Colour 1 + Apply -> back out.
  *
  * One UI only recomputes the palette from a wallpaper set by another app after
  * that off/apply/on/apply round trip.
@@ -252,10 +252,21 @@ class PaletteService : AccessibilityService() {
         pending?.let { main.removeCallbacks(it) }
         step = Step.IDLE
         if (success) Prefs.setPalettePending(this, false)
-        performGlobalAction(GLOBAL_ACTION_HOME)
+        leaveWallpaperAndStyle()
         // One UI re-themes the home screen icons a moment after Apply; keep the
         // cover up until that has finished so the icons don't change in patches.
         main.postDelayed(hideRunnable, if (success) ICONS_SETTLE_MS else 350)
+    }
+
+    /**
+     * Closes Wallpaper and style so the user lands back where they were. BACK is only
+     * sent while it is still on screen (otherwise it would act on the app underneath);
+     * if it is still there afterwards, fall back to the home screen.
+     */
+    private fun leaveWallpaperAndStyle() {
+        if (root() == null) return
+        performGlobalAction(GLOBAL_ACTION_BACK)
+        main.postDelayed({ if (root() != null) performGlobalAction(GLOBAL_ACTION_HOME) }, 700)
     }
 
     // --- timing -------------------------------------------------------------
