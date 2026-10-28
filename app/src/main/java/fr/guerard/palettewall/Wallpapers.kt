@@ -6,6 +6,9 @@ import android.content.Context
 import android.graphics.Bitmap
 import android.graphics.ImageDecoder
 import android.graphics.Rect
+import android.hardware.display.DisplayManager
+import android.util.DisplayMetrics
+import android.view.Display
 import android.net.Uri
 import android.provider.MediaStore
 import android.util.Log
@@ -80,12 +83,14 @@ object Wallpapers {
     }
 
     private fun setFromUri(c: Context, uri: Uri): Boolean = try {
-        val metrics = c.resources.displayMetrics
-        val screenW = metrics.widthPixels
-        val screenH = metrics.heightPixels
+        // Full physical screen size (including status and navigation bars), in portrait.
+        val display = c.getSystemService(DisplayManager::class.java).getDisplay(Display.DEFAULT_DISPLAY)
+        val real = DisplayMetrics().also { @Suppress("DEPRECATION") display.getRealMetrics(it) }
+        val screenW = minOf(real.widthPixels, real.heightPixels)
+        val screenH = maxOf(real.widthPixels, real.heightPixels)
 
         // Decode at roughly screen resolution; ImageDecoder applies EXIF rotation itself.
-        val bmp: Bitmap = ImageDecoder.decodeBitmap(
+        val decoded: Bitmap = ImageDecoder.decodeBitmap(
             ImageDecoder.createSource(c.contentResolver, uri)
         ) { decoder, info, _ ->
             val sample = max(1, minOf(info.size.width / screenW, info.size.height / screenH))
@@ -93,12 +98,17 @@ object Wallpapers {
             decoder.allocator = ImageDecoder.ALLOCATOR_SOFTWARE
         }
 
-        val crop = centreCrop(bmp.width, bmp.height, screenW, screenH)
+        // Zoom to fill: cut the centre to the screen's shape, then scale to the exact
+        // screen size, so One UI has nothing left to fit or letterbox.
+        val crop = centreCrop(decoded.width, decoded.height, screenW, screenH)
+        val cropped = Bitmap.createBitmap(decoded, crop.left, crop.top, crop.width(), crop.height())
+        val filled = Bitmap.createScaledBitmap(cropped, screenW, screenH, true)
+
         val wm = WallpaperManager.getInstance(c)
         var which = WallpaperManager.FLAG_SYSTEM
         if (Prefs.lockToo(c)) which = which or WallpaperManager.FLAG_LOCK
-        wm.setBitmap(bmp, crop, true, which)
-        bmp.recycle()
+        wm.setBitmap(filled, null, true, which)
+        listOf(decoded, cropped, filled).distinct().forEach { it.recycle() }
         Log.i(TAG, "Wallpaper set from $uri")
         true
     } catch (e: Exception) {

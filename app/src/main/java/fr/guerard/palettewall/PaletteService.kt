@@ -30,6 +30,8 @@ class PaletteService : AccessibilityService() {
     private val main = Handler(Looper.getMainLooper())
     private var step = Step.IDLE
     private var pending: Runnable? = null
+    private var turnedOff = false
+    private var paletteCycled = false
 
     private val unlockReceiver = object : BroadcastReceiver() {
         override fun onReceive(c: Context, i: Intent) {
@@ -92,8 +94,10 @@ class PaletteService : AccessibilityService() {
         val launch = Intent().setClassName(DRESSROOM, "$DRESSROOM.presentation.settings.WallpaperSettingActivity")
             .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TASK)
         step = Step.OPEN_MAIN
+        turnedOff = false
+        paletteCycled = false
         main.removeCallbacks(timeout)
-        main.postDelayed(timeout, 15_000)
+        main.postDelayed(timeout, 20_000)
         try {
             startActivity(launch)
         } catch (e: Exception) {
@@ -122,27 +126,45 @@ class PaletteService : AccessibilityService() {
         val root = rootInActiveWindow ?: return
         if (root.packageName?.toString() != DRESSROOM) return
 
+        // The palette screen is recognised by its on/off bar, which stays
+        // visible even while the palette is switched off.
+        val switchBar = byId(root, "color_theme_switch_bar")
         val paletteContainer = byId(root, "color_palette_container")
 
         when {
             // Main "Wallpaper and style" screen: open Colour palette.
-            paletteContainer == null && (step == Step.OPEN_MAIN || step == Step.OPEN_PALETTE) -> {
+            switchBar == null && (step == Step.OPEN_MAIN || step == Step.OPEN_PALETTE) -> {
                 val entry = byId(root, "color_icon") ?: return
                 if (clickUp(entry)) step = Step.OPEN_PALETTE
             }
 
-            paletteContainer != null && (step == Step.OPEN_MAIN || step == Step.OPEN_PALETTE) -> {
-                // Palette must be switched on.
-                val switchBar = byId(root, "color_theme_switch_bar")
-                val toggle = switchBar?.let { firstById(it, "switch_toggle") }
-                if (toggle != null && !toggle.isChecked) {
+            switchBar != null && (step == Step.OPEN_MAIN || step == Step.OPEN_PALETTE) -> {
+                val toggle = firstById(switchBar, "switch_toggle") ?: return
+                // One UI only re-reads the new wallpaper's colours when the palette
+                // is switched off and on again, so always cycle it once.
+                if (!paletteCycled) {
+                    if (toggle.isChecked && !turnedOff) {
+                        clickUp(toggle); turnedOff = true
+                        schedule(700) { advance() }
+                        return
+                    }
+                    if (!toggle.isChecked) {
+                        clickUp(toggle); paletteCycled = true
+                        schedule(900) { advance() }
+                        return
+                    }
+                }
+                if (!toggle.isChecked) {
                     clickUp(toggle)
+                    schedule(700) { advance() }
                     return
                 }
+                if (paletteContainer == null) return // list not shown yet
                 // The first tab is "wallpaper colours" (the second is "basic colours").
                 val firstTab = byId(root, "color_list_tab_layout")?.getChild(0)?.getChild(0)
                 if (firstTab != null && !firstTab.isSelected) {
                     clickUp(firstTab)
+                    schedule(700) { advance() }
                     return
                 }
                 // Make sure the first page of palettes is showing.
