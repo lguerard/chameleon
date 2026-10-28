@@ -1,0 +1,6 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="app_name">Palette Wallpaper</string>
+    <string name="service_label">Palette Wallpaper</string>
+    <string name="service_description">Changes the home screen wallpaper to one of your Gallery favourites when you unlock the phone, then opens Wallpaper and style and applies the first colour palette suggested for it. It only reads and taps inside Samsung\'s Wallpaper and style app.</string>
+</resources>
