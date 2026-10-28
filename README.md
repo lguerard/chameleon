@@ -23,9 +23,12 @@ ID, so it works whatever the phone's language.
 2. Tap *Turn on the accessibility service* and enable **Palette Wallpaper**.
    One UI may first ask you to allow restricted settings for sideloaded apps:
    Settings → Apps → Palette Wallpaper → ⋮ → *Allow restricted settings*.
-3. Switch off any other wallpaper changer, and make sure the current wallpaper is
+3. Samsung only lets apps holding `WRITE_SECURE_SETTINGS` open Wallpaper and
+   style. Grant it once from a computer (it survives updates and reboots):
+   `adb shell pm grant fr.guerard.palettewall android.permission.WRITE_SECURE_SETTINGS`
+4. Switch off any other wallpaper changer, and make sure the current wallpaper is
    a normal image, not a live wallpaper.
-4. Tap *Change wallpaper now* to test the whole flow.
+5. Tap *Change wallpaper now* to test the whole flow.
 
 After that it runs by itself on unlock, at most once per interval (default 120 min).
 You'll see Wallpaper and style open for a second or two, then the home screen.

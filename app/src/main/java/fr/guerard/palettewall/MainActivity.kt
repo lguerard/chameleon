@@ -97,6 +97,12 @@ class MainActivity : Activity() {
             appendLine(if (hasPhotos) "✓ Photo access" else "✗ Photo access missing")
             appendLine(if (favs >= 0) "Favourites found: $favs" else "Favourites: unknown")
             appendLine(if (service) "✓ Accessibility service on" else "✗ Accessibility service off")
+            val secure = checkSelfPermission(android.Manifest.permission.WRITE_SECURE_SETTINGS) ==
+                PackageManager.PERMISSION_GRANTED
+            appendLine(
+                if (secure) "✓ Can open Wallpaper and style"
+                else "✗ Run once on a computer:\nadb shell pm grant $packageName android.permission.WRITE_SECURE_SETTINGS"
+            )
         }
     }
 
