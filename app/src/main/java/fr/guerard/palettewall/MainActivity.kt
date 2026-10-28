@@ -45,7 +45,7 @@ class MainActivity : Activity() {
         })
 
         col.addView(CheckBox(this).apply {
-            text = "Change automatically after unlocking"
+            text = "Change automatically (picture at screen off, colours at unlock)"
             isChecked = Prefs.enabled(this@MainActivity)
             setOnCheckedChangeListener { _, v -> Prefs.setEnabled(this@MainActivity, v) }
         })
@@ -59,6 +59,12 @@ class MainActivity : Activity() {
             text = "Apply the palette to app icons"
             isChecked = Prefs.iconsToo(this@MainActivity)
             setOnCheckedChangeListener { _, v -> Prefs.setIconsToo(this@MainActivity, v) }
+        })
+
+        col.addView(CheckBox(this).apply {
+            text = "Hide Wallpaper and style while the colours update"
+            isChecked = Prefs.hideFlash(this@MainActivity)
+            setOnCheckedChangeListener { _, v -> Prefs.setHideFlash(this@MainActivity, v) }
         })
 
         col.addView(TextView(this).apply { text = "Minimum minutes between changes" })
@@ -79,7 +85,7 @@ class MainActivity : Activity() {
         })
         col.addView(button("Only re-apply the palette") {
             val s = PaletteService.instance
-            if (s == null) toast("Turn on the accessibility service first") else s.fixPaletteOnly()
+            if (s == null) toast("Turn on the accessibility service first") else s.refreshPalette()
         })
 
         setContentView(ScrollView(this).apply { addView(col) })

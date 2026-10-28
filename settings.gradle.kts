@@ -14,5 +14,5 @@ dependencyResolutionManagement {
     }
 }
 
-rootProject.name = "PaletteWallpaper"
+rootProject.name = "Chameleon"
 include(":app")

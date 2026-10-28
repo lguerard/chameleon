@@ -14,7 +14,7 @@ import android.provider.MediaStore
 import android.util.Log
 import kotlin.math.max
 
-const val TAG = "PaletteWall"
+const val TAG = "Chameleon"
 
 object Prefs {
     private const val FILE = "settings"
@@ -24,6 +24,9 @@ object Prefs {
     private const val KEY_ENABLED = "enabled"
     private const val KEY_LOCK_TOO = "lock_too"
     private const val KEY_ICONS_TOO = "icons_too"
+    private const val KEY_QUEUE = "queue"
+    private const val KEY_HIDE_FLASH = "hide_flash"
+    private const val KEY_PALETTE_PENDING = "palette_pending"
 
     private fun p(c: Context) = c.getSharedPreferences(FILE, Context.MODE_PRIVATE)
 
@@ -39,10 +42,24 @@ object Prefs {
     fun iconsToo(c: Context) = p(c).getBoolean(KEY_ICONS_TOO, true)
     fun setIconsToo(c: Context, v: Boolean) = p(c).edit().putBoolean(KEY_ICONS_TOO, v).apply()
 
+    fun hideFlash(c: Context) = p(c).getBoolean(KEY_HIDE_FLASH, true)
+    fun setHideFlash(c: Context, v: Boolean) = p(c).edit().putBoolean(KEY_HIDE_FLASH, v).apply()
+
     fun lastChange(c: Context) = p(c).getLong(KEY_LAST_CHANGE, 0L)
     fun lastId(c: Context) = p(c).getLong(KEY_LAST_ID, -1L)
     fun markChanged(c: Context, id: Long) =
         p(c).edit().putLong(KEY_LAST_CHANGE, System.currentTimeMillis()).putLong(KEY_LAST_ID, id).apply()
+
+    /** Upcoming favourites, shuffled; every one is shown before any repeats. */
+    fun queue(c: Context): List<Long> =
+        p(c).getString(KEY_QUEUE, "")!!.split(',').mapNotNull { it.toLongOrNull() }
+    fun setQueue(c: Context, ids: List<Long>) =
+        p(c).edit().putString(KEY_QUEUE, ids.joinToString(",")).apply()
+
+    /** The wallpaper changed while the screen was off; colours still to update. */
+    fun palettePending(c: Context) = p(c).getBoolean(KEY_PALETTE_PENDING, false)
+    fun setPalettePending(c: Context, v: Boolean) =
+        p(c).edit().putBoolean(KEY_PALETTE_PENDING, v).apply()
 
     fun isDue(c: Context): Boolean =
         System.currentTimeMillis() - lastChange(c) >= intervalMinutes(c) * 60_000L
@@ -67,16 +84,27 @@ object Wallpapers {
         return ids
     }
 
-    /** Picks a random favourite (not the previous one) and sets it. Returns the ID set, or null. */
-    fun setRandomFavourite(c: Context): Long? {
+    /**
+     * Sets the next favourite from a shuffled queue: every favourite is shown once
+     * before any repeats, and favourites added or removed meanwhile are picked up.
+     * Returns the ID set, or null.
+     */
+    fun setNextFavourite(c: Context): Long? {
         val ids = favouriteIds(c)
         if (ids.isEmpty()) {
             Log.w(TAG, "No favourites found (permission missing, or none marked)")
             return null
         }
-        val last = Prefs.lastId(c)
-        val pool = if (ids.size > 1) ids.filter { it != last } else ids
-        val id = pool.random()
+        val current = ids.toSet()
+        var queue = Prefs.queue(c).filter { it in current }
+        if (queue.isEmpty()) {
+            val last = Prefs.lastId(c)
+            queue = ids.shuffled()
+            // Don't start the new round with the picture that ended the last one.
+            if (queue.size > 1 && queue.first() == last) queue = queue.drop(1) + last
+        }
+        val id = queue.first()
+        Prefs.setQueue(c, queue.drop(1))
         val uri = ContentUris.withAppendedId(
             MediaStore.Images.Media.getContentUri(MediaStore.VOLUME_EXTERNAL), id
         )
@@ -112,6 +140,10 @@ object Wallpapers {
         var which = WallpaperManager.FLAG_SYSTEM
         if (Prefs.lockToo(c)) which = which or WallpaperManager.FLAG_LOCK
         wm.setBitmap(filled, null, true, which)
+        // Kept for the overlay that hides Wallpaper and style while the palette is updated.
+        runCatching {
+            previewFile(c).outputStream().use { filled.compress(Bitmap.CompressFormat.JPEG, 85, it) }
+        }
         listOf(decoded, cropped, filled).distinct().forEach { it.recycle() }
         Log.i(TAG, "Wallpaper set from $uri")
         true
@@ -119,6 +151,8 @@ object Wallpapers {
         Log.e(TAG, "Could not set wallpaper from $uri", e)
         false
     }
+
+    fun previewFile(c: Context) = java.io.File(c.cacheDir, "current_wallpaper.jpg")
 
     /** The largest centred rectangle of the image that has the screen's aspect ratio. */
     private fun centreCrop(w: Int, h: Int, sw: Int, sh: Int): Rect {
