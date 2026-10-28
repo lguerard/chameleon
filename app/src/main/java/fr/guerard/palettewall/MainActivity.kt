@@ -16,6 +16,7 @@ import android.provider.Settings
 import android.text.Editable
 import android.text.InputType
 import android.text.TextWatcher
+import android.text.format.DateUtils
 import android.view.Gravity
 import android.view.ViewGroup
 import android.view.WindowInsets
@@ -49,6 +50,7 @@ class MainActivity : Activity() {
     private val bad = 0xFFE53935.toInt()
 
     private lateinit var setup: LinearLayout
+    private lateinit var lastChange: TextView
 
     private val mediaPermission =
         if (Build.VERSION.SDK_INT >= 33) Manifest.permission.READ_MEDIA_IMAGES
@@ -131,6 +133,12 @@ class MainActivity : Activity() {
         options.addView(intervalRow)
 
         val actions = section(col, "Actions")
+        lastChange = TextView(this).apply {
+            textSize = 14f
+            setTextColor(subtext)
+            setPadding(0, px(8), 0, px(8))
+        }
+        actions.addView(lastChange)
         actions.addView(bigButton("Change wallpaper now", true) {
             val s = PaletteService.instance
             if (s == null) toast("Turn on the accessibility service first") else s.runNow()
@@ -175,6 +183,7 @@ class MainActivity : Activity() {
 
     /** Rebuilds the setup checklist; tapping a missing item does the fix. */
     private fun refresh() {
+        lastChange.text = lastChangeText()
         setup.removeAllViews()
         val hasPhotos = checkSelfPermission(mediaPermission) == PackageManager.PERMISSION_GRANTED
         val favs = if (hasPhotos) runCatching { Wallpapers.favouriteIds(this).size }.getOrDefault(-1) else -1
@@ -205,6 +214,17 @@ class MainActivity : Activity() {
                 toast("Command copied")
             }
         })
+    }
+
+    /** "Last change: 12 minutes ago · next in 108 min" (or "due at the next screen off"). */
+    private fun lastChangeText(): String {
+        val last = Prefs.lastChange(this)
+        if (last == 0L) return "No wallpaper change yet"
+        val now = System.currentTimeMillis()
+        val ago = DateUtils.getRelativeTimeSpanString(last, now, DateUtils.MINUTE_IN_MILLIS)
+        val left = (last + Prefs.intervalMinutes(this) * 60_000L - now) / 60_000
+        return "Last change: $ago · " +
+            if (left > 0) "next possible in $left min" else "due at the next screen off"
     }
 
     // --- view helpers -------------------------------------------------------
