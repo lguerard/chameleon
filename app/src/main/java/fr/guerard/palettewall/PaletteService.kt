@@ -49,6 +49,7 @@ class PaletteService : AccessibilityService() {
     private var phase = Phase.OFF
     private var pending: Runnable? = null
     private var overlay: View? = null
+    private var iconsCycled = false
     private val hideRunnable = Runnable { hideOverlay() }
 
     private val screenReceiver = object : BroadcastReceiver() {
@@ -135,6 +136,7 @@ class PaletteService : AccessibilityService() {
             .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TASK)
         step = Step.NAVIGATE
         phase = Phase.OFF
+        iconsCycled = false
         main.removeCallbacks(timeout)
         main.postDelayed(timeout, 25_000)
         if (Prefs.hideFlash(this)) showOverlay()
@@ -191,10 +193,21 @@ class PaletteService : AccessibilityService() {
                 val wantIcons = Prefs.iconsToo(this)
                 val icons = iconToggle(root)
                 Log.i(TAG, "Icons switch: found=${icons != null}, checked=${icons?.isChecked}, want=$wantIcons")
-                if (icons != null && icons.isChecked != wantIcons) {
-                    clickUp(icons)
-                    waitFor({ iconToggle(it)?.isChecked == wantIcons }) { advance() }
-                    return
+                if (icons != null) {
+                    // One UI only re-themes the icons when this switch changes in the
+                    // same Apply, so if it is already on, flip it off and on again.
+                    if (wantIcons && icons.isChecked && !iconsCycled) {
+                        iconsCycled = true
+                        clickUp(icons)
+                        waitFor({ iconToggle(it)?.isChecked == false }) { advance() }
+                        return
+                    }
+                    if (icons.isChecked != wantIcons) {
+                        iconsCycled = true
+                        clickUp(icons)
+                        waitFor({ iconToggle(it)?.isChecked == wantIcons }) { advance() }
+                        return
+                    }
                 }
                 // The first tab is "wallpaper colours" (the second is "basic colours").
                 val firstTab = firstTab(root)
