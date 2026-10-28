@@ -50,6 +50,11 @@ class PaletteService : AccessibilityService() {
     private var pending: Runnable? = null
     private var overlay: View? = null
     private var iconsCycled = false
+    private var turnedOff = false
+    /** A wallpaper is being decoded and set after screen off. */
+    private var preparing = false
+    /** Unlocked while [preparing]: refresh the palette once the wallpaper is set. */
+    private var refreshWhenReady = false
     private val hideRunnable = Runnable { hideOverlay() }
     private var lastAttempt = 0L
     private var lastNote = ""
@@ -66,9 +71,12 @@ class PaletteService : AccessibilityService() {
             if (!Prefs.enabled(c) || step != Step.IDLE) return
             when (i.action) {
                 // Change the picture while nobody is looking.
-                Intent.ACTION_SCREEN_OFF -> if (Prefs.isDue(c)) prepareWallpaper()
+                Intent.ACTION_SCREEN_OFF -> if (Prefs.isDue(c) && !preparing) prepareWallpaper()
                 // Then fix the colours right after unlocking.
                 Intent.ACTION_USER_PRESENT -> when {
+                    // Quick unlock: the new wallpaper isn't set yet (and isn't due
+                    // anymore). Starting now would set a second one or match the old one.
+                    preparing -> { Log.i(TAG, "Unlocked while the wallpaper is being set: waiting"); refreshWhenReady = true }
                     // A failed run is retried at most every RETRY_MS, so a stuck
                     // flow can't cover the screen at every unlock.
                     Prefs.palettePending(c) ->
@@ -113,18 +121,31 @@ class PaletteService : AccessibilityService() {
         val lock = getSystemService(PowerManager::class.java)
             .newWakeLock(PowerManager.PARTIAL_WAKE_LOCK, "Chameleon:wallpaper")
         lock.acquire(60_000)
+        preparing = true
+        refreshWhenReady = false
         Thread {
+            var set = false
             try {
-                if (Wallpapers.setNextFavourite(this) != null) Prefs.setPalettePending(this, true)
+                set = Wallpapers.setNextFavourite(this) != null
+                if (set) Prefs.setPalettePending(this, true)
             } finally {
                 if (lock.isHeld) lock.release()
+                main.post {
+                    preparing = false
+                    // A new picture deserves a run even if the last one failed recently.
+                    if (set) lastAttempt = 0L
+                    if (refreshWhenReady) {
+                        refreshWhenReady = false
+                        if (set) refreshPalette()
+                    }
+                }
             }
         }.start()
     }
 
     /** Changes the wallpaper now and then refreshes the palette. */
     fun runNow() {
-        if (step != Step.IDLE) return
+        if (step != Step.IDLE || preparing) return
         step = Step.WAIT // busy while the wallpaper is being set
         Thread {
             val id = Wallpapers.setNextFavourite(this)
@@ -142,13 +163,14 @@ class PaletteService : AccessibilityService() {
 
     /** Refreshes the palette for the current wallpaper. */
     fun refreshPalette() {
-        if (step != Step.IDLE) return
+        if (step != Step.IDLE || preparing) return
         // The "Wallpaper and style" screen Settings opens (it has no launcher entry).
         val launch = Intent().setClassName(DRESSROOM, "$DRESSROOM.presentation.settings.WallpaperSettingActivity")
             .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TASK)
         step = Step.NAVIGATE
         phase = Phase.OFF
         iconsCycled = false
+        turnedOff = false
         lastAttempt = System.currentTimeMillis()
         lastNote = ""
         main.removeCallbacks(timeout)
@@ -184,7 +206,8 @@ class PaletteService : AccessibilityService() {
             // Main "Wallpaper and style" screen: open Colour palette.
             val icon = byId(root, "color_icon")
             note(if (icon == null) "Main screen: colour palette entry not found" else "Main screen: opening colour palette")
-            icon?.let { clickUp(it) }
+            // Wait for the palette screen, or the next beat would open it a second time.
+            if (icon != null && clickUp(icon)) waitFor({ switchBar(it) != null }, 3000) { advance() }
             return
         }
         val toggle = paletteToggle(root)
@@ -193,9 +216,14 @@ class PaletteService : AccessibilityService() {
         when (phase) {
             Phase.OFF -> if (toggle.isChecked) {
                 clickUp(toggle)
+                turnedOff = true
                 waitFor({ paletteToggle(it)?.isChecked == false }) { advance() }
             } else {
-                applyWhenReady("palette off", 1500) {
+                applyWhenReady("palette off", 1500) { applied ->
+                    // Without this Apply the round trip doesn't recompute anything:
+                    // try again rather than go on (the timeout ends a hopeless run).
+                    // If it was already off when we arrived, there is nothing to apply.
+                    if (!applied && turnedOff) { advance(); return@applyWhenReady }
                     phase = Phase.ON
                     // Done when the change is saved (Apply greys out) or the screen closes.
                     waitFor({ !applyEnabled(it) || switchBar(it) == null }, 2500) { advance() }
