@@ -50,3 +50,12 @@ builds the minified release APK with Gradle 8.11.1 / AGP 8.7.3, signed (release 
 
 `adb logcat -s Chameleon`. After a One UI update, re-dump the screens with
 `adb shell uiautomator dump` and check the IDs in `PaletteService.kt`.
+
+## Commits and releases
+
+Commits must be conventional, because git-cliff (`cliff.toml`) builds the
+release notes from them: `<type>(<scope>): <icon> <short description>`, first
+line under 78 characters. Types that appear in the notes: `feat`, `fix`, `perf`,
+`refactor`, `docs`, `ci`, `build`; `chore`, `style`, `test`, `wip` are skipped.
+Release: `git tag vX.Y.Z && git push origin vX.Y.Z` builds the APK and publishes
+a GitHub release whose notes come from `git cliff --latest`.
