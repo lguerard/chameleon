@@ -220,10 +220,12 @@ class PaletteService : AccessibilityService() {
                 if (container == null) { Log.i(TAG, "Palette list not found yet"); return }
                 // Show the first page of palettes, then pick Colour 1 and apply.
                 container.performAction(AccessibilityNodeInfo.ACTION_SCROLL_BACKWARD)
-                later(250) {
-                    val first = root()?.let { byId(it, "color_palette_container") }?.let { firstClickable(it) }
-                    Log.i(TAG, "Colour 1 found=${first != null}, clicked=${first?.performAction(AccessibilityNodeInfo.ACTION_CLICK)}")
-                    waitFor({ applyEnabled(it) }) { ok ->
+                // The list can be rebuilt after the icons switch changes, so wait
+                // until Colour 1 really is there before clicking it.
+                waitFor({ colour1(it) != null }, 4000) { found ->
+                    val first = root()?.let { colour1(it) }
+                    Log.i(TAG, "Colour 1 found=$found, clicked=${first?.performAction(AccessibilityNodeInfo.ACTION_CLICK)}")
+                    waitFor({ applyEnabled(it) }, 2500) { ok ->
                         val applied = ok && pressApply("palette on")
                         waitFor({ !applyEnabled(it) || switchBar(it) == null }, 2500) {
                             // Only count it as done if Apply was really pressed; otherwise
@@ -357,6 +359,7 @@ class PaletteService : AccessibilityService() {
     private fun byId(node: AccessibilityNodeInfo, id: String): AccessibilityNodeInfo? =
         node.findAccessibilityNodeInfosByViewId("$DRESSROOM:id/$id").firstOrNull()
 
+    private fun colour1(root: AccessibilityNodeInfo) = byId(root, "color_palette_container")?.let { firstClickable(it) }
     private fun switchBar(root: AccessibilityNodeInfo) = byId(root, "color_theme_switch_bar")
     private fun paletteToggle(root: AccessibilityNodeInfo) = switchBar(root)?.let { byId(it, "switch_toggle") }
     private fun iconToggle(root: AccessibilityNodeInfo) = byId(root, "switch_app_icon")?.let { byId(it, "switch_toggle") }
