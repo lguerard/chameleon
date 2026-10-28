@@ -190,6 +190,7 @@ class PaletteService : AccessibilityService() {
                 // "Apply palette to app icons", as chosen in the app.
                 val wantIcons = Prefs.iconsToo(this)
                 val icons = iconToggle(root)
+                Log.i(TAG, "Icons switch: found=${icons != null}, checked=${icons?.isChecked}, want=$wantIcons")
                 if (icons != null && icons.isChecked != wantIcons) {
                     clickUp(icons)
                     waitFor({ iconToggle(it)?.isChecked == wantIcons }) { advance() }
@@ -202,17 +203,19 @@ class PaletteService : AccessibilityService() {
                     waitFor({ firstTab(it)?.isSelected == true }) { advance() }
                     return
                 }
-                val container = byId(root, "color_palette_container") ?: return
+                val container = byId(root, "color_palette_container")
+                if (container == null) { Log.i(TAG, "Palette list not found yet"); return }
                 // Show the first page of palettes, then pick Colour 1 and apply.
                 container.performAction(AccessibilityNodeInfo.ACTION_SCROLL_BACKWARD)
                 later(250) {
-                    root()?.let { byId(it, "color_palette_container") }
-                        ?.let { firstClickable(it) }
-                        ?.performAction(AccessibilityNodeInfo.ACTION_CLICK)
+                    val first = root()?.let { byId(it, "color_palette_container") }?.let { firstClickable(it) }
+                    Log.i(TAG, "Colour 1 found=${first != null}, clicked=${first?.performAction(AccessibilityNodeInfo.ACTION_CLICK)}")
                     waitFor({ applyEnabled(it) }) { ok ->
-                        if (ok) pressApply("palette on")
+                        val applied = ok && pressApply("palette on")
                         waitFor({ !applyEnabled(it) || switchBar(it) == null }, 2500) {
-                            finish(success = true)
+                            // Only count it as done if Apply was really pressed; otherwise
+                            // the palette stays pending and the next unlock retries.
+                            finish(success = applied)
                         }
                     }
                 }
@@ -220,14 +223,13 @@ class PaletteService : AccessibilityService() {
         }
     }
 
-    private fun pressApply(label: String) {
+    /** Presses Apply if it is enabled; returns whether the click was sent. */
+    private fun pressApply(label: String): Boolean {
         val button = root()?.let { byId(it, "bottom_button") }
-        if (button != null && button.isEnabled) {
+        val sent = button != null && button.isEnabled &&
             button.performAction(AccessibilityNodeInfo.ACTION_CLICK)
-            Log.i(TAG, "Applied ($label)")
-        } else {
-            Log.i(TAG, "Apply not enabled ($label)")
-        }
+        Log.i(TAG, if (sent) "Applied ($label)" else "Apply not enabled ($label)")
+        return sent
     }
 
     private fun finish(success: Boolean) {
