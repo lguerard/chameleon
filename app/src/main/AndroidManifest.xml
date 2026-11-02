@@ -19,6 +19,11 @@
     <!-- Needed on Android 11+ to resolve Samsung's wallpaper app -->
     <queries>
         <package android:name="com.samsung.android.app.dressroom" />
+        <!-- To find the home screen app -->
+        <intent>
+            <action android:name="android.intent.action.MAIN" />
+            <category android:name="android.intent.category.HOME" />
+        </intent>
     </queries>
 
     <application

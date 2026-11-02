@@ -1,10 +1,12 @@
 package fr.guerard.palettewall
 
 import android.accessibilityservice.AccessibilityService
+import android.app.KeyguardManager
 import android.content.BroadcastReceiver
 import android.content.Context
 import android.content.Intent
 import android.content.IntentFilter
+import android.content.pm.PackageManager
 import android.graphics.BitmapFactory
 import android.graphics.Color
 import android.graphics.PixelFormat
@@ -25,8 +27,9 @@ import android.widget.Toast
 
 /**
  * When the screen turns off (at most once per interval), sets the next Gallery
- * favourite as the wallpaper. At the next unlock it refreshes One UI's colour
- * palette, hidden behind an overlay showing the new wallpaper:
+ * favourite as the wallpaper. Once the unlocked home screen sits untouched for a
+ * few seconds, it refreshes One UI's colour palette, hidden behind an overlay
+ * showing the new wallpaper:
  *
  *  Wallpaper and style -> Colour palette ->
  *  switch OFF + Apply -> switch ON, icons option, Colour 1 + Apply -> back out.
@@ -53,8 +56,14 @@ class PaletteService : AccessibilityService() {
     private var turnedOff = false
     /** A wallpaper is being decoded and set after screen off. */
     private var preparing = false
-    /** Unlocked while [preparing]: refresh the palette once the wallpaper is set. */
-    private var refreshWhenReady = false
+    /** The home screen app; the colour update waits until it sits idle in front. */
+    private val launcher by lazy {
+        packageManager.resolveActivity(
+            Intent(Intent.ACTION_MAIN).addCategory(Intent.CATEGORY_HOME),
+            PackageManager.MATCH_DEFAULT_ONLY
+        )?.activityInfo?.packageName
+    }
+    private val idleHome = Runnable { runIfHomeIdle() }
     private val hideRunnable = Runnable { hideOverlay() }
     private var lastAttempt = 0L
     private var lastNote = ""
@@ -68,21 +77,17 @@ class PaletteService : AccessibilityService() {
                 finish(success = false)
                 return
             }
+            if (i.action == Intent.ACTION_SCREEN_OFF) main.removeCallbacks(idleHome)
             if (!Prefs.enabled(c) || step != Step.IDLE) return
             when (i.action) {
                 // Change the picture while nobody is looking.
                 Intent.ACTION_SCREEN_OFF -> if (Prefs.isDue(c) && !preparing) prepareWallpaper()
-                // Then fix the colours right after unlocking.
-                Intent.ACTION_USER_PRESENT -> when {
-                    // Quick unlock: the new wallpaper isn't set yet (and isn't due
-                    // anymore). Starting now would set a second one or match the old one.
-                    preparing -> { Log.i(TAG, "Unlocked while the wallpaper is being set: waiting"); refreshWhenReady = true }
-                    // A failed run is retried at most every RETRY_MS, so a stuck
-                    // flow can't cover the screen at every unlock.
-                    Prefs.palettePending(c) ->
-                        if (System.currentTimeMillis() - lastAttempt >= RETRY_MS) main.postDelayed({ refreshPalette() }, 400)
-                    Prefs.isDue(c) -> main.postDelayed({ runNow() }, 400)
-                }
+                // Never start the colour update at unlock: it waits for the home
+                // screen to sit idle, so it can't cut into what you're doing.
+                Intent.ACTION_USER_PRESENT ->
+                    // Screen-off change missed: set the picture now, in the background.
+                    if (!preparing && !Prefs.palettePending(c) && Prefs.isDue(c)) prepareWallpaper()
+                    else armIdleHome()
             }
         }
     }
@@ -104,7 +109,12 @@ class PaletteService : AccessibilityService() {
         } else {
             registerReceiver(screenReceiver, filter)
         }
-        Log.i(TAG, "Service connected")
+        // The XML only lists Wallpaper and style; add the home screen app, whose
+        // package is only known at runtime, to notice when it sits idle.
+        launcher?.let { home ->
+            serviceInfo = serviceInfo.apply { packageNames = arrayOf(DRESSROOM, home) }
+        }
+        Log.i(TAG, "Service connected (home screen: $launcher)")
     }
 
     override fun onDestroy() {
@@ -122,7 +132,6 @@ class PaletteService : AccessibilityService() {
             .newWakeLock(PowerManager.PARTIAL_WAKE_LOCK, "Chameleon:wallpaper")
         lock.acquire(60_000)
         preparing = true
-        refreshWhenReady = false
         Thread {
             var set = false
             try {
@@ -134,10 +143,7 @@ class PaletteService : AccessibilityService() {
                     preparing = false
                     // A new picture deserves a run even if the last one failed recently.
                     if (set) lastAttempt = 0L
-                    if (refreshWhenReady) {
-                        refreshWhenReady = false
-                        if (set) refreshPalette()
-                    }
+                    armIdleHome()
                 }
             }
         }.start()
@@ -188,9 +194,37 @@ class PaletteService : AccessibilityService() {
     }
 
     override fun onAccessibilityEvent(event: AccessibilityEvent?) {
-        if (step != Step.NAVIGATE || event?.packageName?.toString() != DRESSROOM) return
+        val pkg = event?.packageName?.toString() ?: return
+        // Any activity on the home screen (scroll, tap, page change) restarts the idle countdown.
+        if (step == Step.IDLE) {
+            if (pkg == launcher) armIdleHome()
+            return
+        }
+        if (step != Step.NAVIGATE || pkg != DRESSROOM) return
         // Wait until the screen stops changing before acting.
         schedule(250) { advance() }
+    }
+
+    // --- idle home screen ---------------------------------------------------
+
+    private fun homeRunAllowed() =
+        step == Step.IDLE && !preparing && Prefs.enabled(this) && Prefs.palettePending(this) &&
+            System.currentTimeMillis() - lastAttempt >= RETRY_MS
+
+    /** (Re)starts the countdown to a colour update, if one is waiting. */
+    private fun armIdleHome() {
+        main.removeCallbacks(idleHome)
+        if (homeRunAllowed()) main.postDelayed(idleHome, HOME_IDLE_MS)
+    }
+
+    /** Runs the colour update only if the unlocked home screen is still in front. */
+    private fun runIfHomeIdle() {
+        val front = rootInActiveWindow?.packageName?.toString()
+        val locked = getSystemService(KeyguardManager::class.java).isKeyguardLocked
+        val on = getSystemService(PowerManager::class.java).isInteractive
+        if (!homeRunAllowed() || front != launcher || locked || !on) return
+        Log.i(TAG, "Home screen idle: updating the colours")
+        refreshPalette()
     }
 
     // --- flow ---------------------------------------------------------------
@@ -483,6 +517,8 @@ class PaletteService : AccessibilityService() {
         /** How long the cover stays up after a successful run (ponytail: tune on the phone). */
         const val ICONS_SETTLE_MS = 1800L
         /** A normal run takes about 6 s; past this the flow is stuck. */
+        /** How long the home screen must sit untouched before the colours are updated. */
+        const val HOME_IDLE_MS = 3_000L
         const val FLOW_TIMEOUT_MS = 15_000L
         const val RETRY_MS = 10 * 60_000L
         const val DRESSROOM = "com.samsung.android.app.dressroom"

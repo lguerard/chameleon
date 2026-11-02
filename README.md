@@ -32,8 +32,9 @@ ID, so it works whatever the phone's language.
 5. Tap *Change wallpaper now* to test the whole flow.
 
 After that it runs by itself, at most once per interval (default 120 min): the
-picture changes when the screen turns off, and the colours are refreshed right
-after you unlock, behind a cover showing the new wallpaper. Favourites are
+picture changes when the screen turns off, and the colours are refreshed the
+next time the home screen sits untouched for 3 s, behind a cover showing the
+new wallpaper (tap it to cancel). It never starts while an app is open. Favourites are
 shuffled, and each is shown once before any repeats.
 
 ## Debugging

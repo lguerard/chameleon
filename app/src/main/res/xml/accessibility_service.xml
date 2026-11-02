@@ -1,8 +1,9 @@
 <?xml version="1.0" encoding="utf-8"?>
-<!-- Only listens to Samsung's "Wallpaper and style" app, and only to tap
-     the colour palette controls after this app changes the wallpaper. -->
+<!-- Listens to Samsung's "Wallpaper and style" app, to tap the colour palette
+     controls after this app changes the wallpaper, and (added at runtime) to the
+     home screen app, only to notice when it sits idle. -->
 <accessibility-service xmlns:android="http://schemas.android.com/apk/res/android"
-    android:accessibilityEventTypes="typeWindowStateChanged|typeWindowContentChanged"
+    android:accessibilityEventTypes="typeWindowStateChanged|typeWindowContentChanged|typeViewClicked|typeViewScrolled"
     android:accessibilityFeedbackType="feedbackGeneric"
     android:accessibilityFlags="flagReportViewIds|flagIncludeNotImportantViews|flagRetrieveInteractiveWindows"
     android:canRetrieveWindowContent="true"

@@ -96,7 +96,7 @@ class MainActivity : Activity() {
         val options = section(col, "Behaviour")
         options.addView(switchRow(
             "Change automatically",
-            "Picture at screen off, colours at unlock",
+            "Picture at screen off, colours when the home screen is idle",
             Prefs.enabled(this)
         ) { Prefs.setEnabled(this, it) })
         options.addView(switchRow(
