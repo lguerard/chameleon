@@ -7,13 +7,17 @@ import android.content.Context
 import android.content.Intent
 import android.content.IntentFilter
 import android.content.pm.PackageManager
+import android.content.res.Configuration
+import android.database.ContentObserver
 import android.graphics.BitmapFactory
 import android.graphics.Color
 import android.graphics.PixelFormat
+import android.net.Uri
 import android.os.Build
 import android.os.Handler
 import android.os.Looper
 import android.os.PowerManager
+import android.provider.Settings
 import android.util.Log
 import android.view.Gravity
 import android.view.View
@@ -65,6 +69,17 @@ class PaletteService : AccessibilityService() {
     }
     private val idleHome = Runnable { runIfHomeIdle() }
     private val hideRunnable = Runnable { hideOverlay() }
+    /**
+     * Counts signs that One UI has actually applied a palette change: its theme
+     * settings being written, or the configuration change the new theme causes.
+     */
+    private var themeWrites = 0
+    private val themeObserver = object : ContentObserver(main) {
+        override fun onChange(selfChange: Boolean, uri: Uri?) {
+            themeWrites++
+            if (step != Step.IDLE) Log.i(TAG, "Theme setting written: ${uri?.lastPathSegment}")
+        }
+    }
     private var lastAttempt = 0L
     private var lastNote = ""
 
@@ -114,12 +129,27 @@ class PaletteService : AccessibilityService() {
         launcher?.let { home ->
             serviceInfo = serviceInfo.apply { packageNames = arrayOf(DRESSROOM, home) }
         }
+        listOf(
+            Settings.Secure.getUriFor("theme_customization_overlay_packages"),
+            Settings.System.getUriFor("wallpapertheme_state"),
+            Settings.System.getUriFor("wallpapertheme_color"),
+        ).forEach { uri ->
+            runCatching { contentResolver.registerContentObserver(uri, false, themeObserver) }
+                .onFailure { Log.w(TAG, "Cannot watch $uri", it) }
+        }
         Log.i(TAG, "Service connected (home screen: $launcher)")
+    }
+
+    override fun onConfigurationChanged(newConfig: Configuration) {
+        super.onConfigurationChanged(newConfig)
+        themeWrites++
+        if (step != Step.IDLE) Log.i(TAG, "Configuration changed (new theme)")
     }
 
     override fun onDestroy() {
         instance = null
         runCatching { unregisterReceiver(screenReceiver) }
+        runCatching { contentResolver.unregisterContentObserver(themeObserver) }
         hideOverlay()
         super.onDestroy()
     }
@@ -255,6 +285,7 @@ class PaletteService : AccessibilityService() {
                 waitFor({ paletteToggle(it)?.isChecked == false }) { advance() }
             } else {
                 if (!turnedOff) Log.i(TAG, "Palette switch already off")
+                val writes = themeWrites
                 applyWhenReady("palette off", 4000) { applied ->
                     // Without this Apply the round trip doesn't recompute anything,
                     // so try again while Apply is there to press (the timeout ends a
@@ -264,8 +295,15 @@ class PaletteService : AccessibilityService() {
                         advance(); return@applyWhenReady
                     }
                     phase = Phase.ON
-                    // Done when the change is saved (Apply greys out) or the screen closes.
-                    waitFor({ !applyEnabled(it) || switchBar(it) == null }, 2500) { advance() }
+                    if (!applied) { advance(); return@applyWhenReady }
+                    // Apply greys out at once, but One UI goes on switching the theme
+                    // off for a while; turning it back on meanwhile gets lost and leaves
+                    // the default colours. Wait until it has really applied the change,
+                    // then let the screen settle.
+                    waitUntil({ themeWrites > writes }, OFF_APPLY_MAX_MS) { seen ->
+                        Log.i(TAG, if (seen) "Palette off took effect" else "No sign the palette went off: going on")
+                        settleThenAdvance(themeWrites)
+                    }
                 }
             }
 
@@ -311,11 +349,15 @@ class PaletteService : AccessibilityService() {
                 waitFor({ colour1(it) != null }, 4000) { found ->
                     val first = root()?.let { colour1(it) }
                     Log.i(TAG, "Colour 1 found=$found, clicked=${first?.performAction(AccessibilityNodeInfo.ACTION_CLICK)}")
+                    val writes = themeWrites
                     applyWhenReady("palette on") { applied ->
-                        waitFor({ !applyEnabled(it) || switchBar(it) == null }, 2500) { saved ->
-                            Log.i(TAG, "Palette run done: applied=$applied, saved=$saved")
-                            // Only done if Apply was pressed and it took effect; otherwise
-                            // the palette stays pending and the next unlock retries.
+                        waitUntil({ themeWrites > writes }, ON_APPLY_MAX_MS) { seen ->
+                            // No signal at all (should not happen): fall back to the
+                            // greyed-out Apply, rather than redo a run that may have worked.
+                            val saved = seen || root()?.let { !applyEnabled(it) } == true
+                            Log.i(TAG, "Palette run done: applied=$applied, took effect=$seen, saved=$saved")
+                            // Only done if One UI really applied the palette; otherwise it
+                            // stays pending and is retried later.
                             finish(success = applied && saved)
                         }
                     }
@@ -391,6 +433,14 @@ class PaletteService : AccessibilityService() {
         main.postDelayed(r, delayMs)
     }
 
+    /**
+     * Waits until One UI has been quiet for [SETTLE_MS] (no more theme writes, so
+     * a late one can't be mistaken for the next Apply taking effect), then goes on.
+     */
+    private fun settleThenAdvance(writes: Int) {
+        later(SETTLE_MS) { if (themeWrites != writes) settleThenAdvance(themeWrites) else advance() }
+    }
+
     /** Runs [block] after [delayMs], ignoring screen events in the meantime. */
     private fun later(delayMs: Long, block: () -> Unit) {
         step = Step.WAIT
@@ -405,11 +455,14 @@ class PaletteService : AccessibilityService() {
         done: (AccessibilityNodeInfo) -> Boolean,
         maxMs: Long = 1500,
         then: (Boolean) -> Unit,
-    ) {
+    ) = waitUntil({ root()?.let { runCatching { done(it) }.getOrDefault(false) } ?: false }, maxMs, then)
+
+    /** Like [waitFor], for a condition that doesn't need the screen. */
+    private fun waitUntil(done: () -> Boolean, maxMs: Long, then: (Boolean) -> Unit) {
         step = Step.WAIT
         val deadline = System.currentTimeMillis() + maxMs
         fun poll() {
-            val ok = root()?.let { runCatching { done(it) }.getOrDefault(false) } ?: false
+            val ok = done()
             if (ok || System.currentTimeMillis() >= deadline) {
                 step = Step.NAVIGATE
                 then(ok)
@@ -516,10 +569,15 @@ class PaletteService : AccessibilityService() {
     companion object {
         /** How long the cover stays up after a successful run (ponytail: tune on the phone). */
         const val ICONS_SETTLE_MS = 1800L
-        /** A normal run takes about 6 s; past this the flow is stuck. */
         /** How long the home screen must sit untouched before the colours are updated. */
         const val HOME_IDLE_MS = 3_000L
-        const val FLOW_TIMEOUT_MS = 15_000L
+        /** A normal run takes about 6 s; past this the flow is stuck. */
+        const val FLOW_TIMEOUT_MS = 20_000L
+        /** How long One UI may take to apply the palette going off, then on. */
+        const val OFF_APPLY_MAX_MS = 5_000L
+        const val ON_APPLY_MAX_MS = 5_000L
+        /** Quiet time needed after the palette went off, while the screen redraws. */
+        const val SETTLE_MS = 800L
         const val RETRY_MS = 10 * 60_000L
         const val DRESSROOM = "com.samsung.android.app.dressroom"
         var instance: PaletteService? = null

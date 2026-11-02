@@ -38,7 +38,10 @@ makes One UI's colour palette follow each picture.
   accessibility overlay showing the new wallpaper. One UI ignores outside writes
   to both `theme_customization_overlay_packages` and Samsung's
   `wallpapertheme_color` (tested 2026-11-02), so there is no background route; each step polls the screen instead of fixed delays;
-  15 s timeout (tap to cancel); then back out of Wallpaper and style (home only as a fallback) and remove the overlay.
+  after each Apply, waits for One UI to really apply it (a theme setting written or a
+  configuration change) instead of trusting the greyed-out button, since turning
+  the palette back on too soon after "off" is lost and leaves the default colours;
+  20 s timeout (tap to cancel); then back out of Wallpaper and style (home only as a fallback) and remove the overlay.
 - Options in the app: auto on/off, lock screen too, icons too, hide flash,
   interval; buttons "Change wallpaper now" and "Only re-apply the palette".
 
