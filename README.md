@@ -37,6 +37,17 @@ next time the home screen sits untouched for 3 s, behind a cover showing the
 new wallpaper (tap it to cancel). It never starts while an app is open. Favourites are
 shuffled, and each is shown once before any repeats.
 
+### Colours right after screen off (experimental)
+
+With this option the colours are never updated on the home screen. Instead, when
+you turn the screen off and a change is due, the phone stays awake a few more
+seconds behind a black cover (it looks off), changes the picture and the
+colours, then locks itself. It only works while the phone has not locked yet, so
+in Settings → Lock screen → Secure lock settings turn off *Lock instantly with
+side button* and set *Lock automatically* to 5 seconds or more. If the screen
+does not wake, allow Chameleon in Settings → Apps → Special access → *Turn
+screen on*. Touching the black screen shows a hint; a second touch cancels.
+
 ## Debugging
 
 ```bash

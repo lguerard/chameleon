@@ -2,6 +2,7 @@ package fr.guerard.palettewall
 
 import android.accessibilityservice.AccessibilityService
 import android.app.KeyguardManager
+import android.app.WallpaperManager
 import android.content.BroadcastReceiver
 import android.content.Context
 import android.content.Intent
@@ -81,22 +82,55 @@ class PaletteService : AccessibilityService() {
         }
     }
     private var lastAttempt = 0L
+    /**
+     * The current run started at screen off: the screen was woken again behind a
+     * black cover (which looks switched off on an OLED) and is locked afterwards.
+     */
+    private var hidden = false
+    /** Bumped for every hidden run, so a late wallpaper thread can't revive an ended one. */
+    private var hiddenRun = 0
+    private var screenLock: PowerManager.WakeLock? = null
+    /** The next screen off is our own lock ending a hidden run, not the user's. */
+    private var selfLock = false
+    private val selfLockExpired = Runnable { selfLock = false; hideOverlay() }
+    /** Counts the system reporting new wallpaper colours, which One UI's suggestions need. */
+    private var colourEvents = 0
+    private val coloursListener = WallpaperManager.OnColorsChangedListener { _, _ -> colourEvents++ }
     private var lastNote = ""
 
     private val screenReceiver = object : BroadcastReceiver() {
         override fun onReceive(c: Context, i: Intent) {
             Log.i(TAG, "${i.action} (enabled=${Prefs.enabled(c)}, step=$step, due=${Prefs.isDue(c)} [every ${Prefs.intervalMinutes(c)} min, last ${(System.currentTimeMillis() - Prefs.lastChange(c)) / 60_000} min ago], pending=${Prefs.palettePending(c)})")
+            if (i.action == Intent.ACTION_SCREEN_OFF && selfLock) {
+                // Our own lock at the end of a hidden run: uncover the (off) screen.
+                main.removeCallbacks(selfLockExpired)
+                selfLockExpired.run()
+                return
+            }
             // Screen turned off mid-flow: give up and never leave the cover up.
-            if (i.action == Intent.ACTION_SCREEN_OFF && step != Step.IDLE) {
+            if (i.action == Intent.ACTION_SCREEN_OFF && (step != Step.IDLE || hidden)) {
                 Log.w(TAG, "Screen off during the flow: aborting")
-                finish(success = false)
+                finish(success = false, relock = false)
                 return
             }
             if (i.action == Intent.ACTION_SCREEN_OFF) main.removeCallbacks(idleHome)
             if (!Prefs.enabled(c) || step != Step.IDLE) return
             when (i.action) {
                 // Change the picture while nobody is looking.
-                Intent.ACTION_SCREEN_OFF -> if (Prefs.isDue(c) && !preparing) prepareWallpaper()
+                Intent.ACTION_SCREEN_OFF -> if (!preparing) {
+                    val due = Prefs.isDue(c)
+                    val retry = Prefs.palettePending(c) && System.currentTimeMillis() - lastAttempt >= RETRY_MS
+                    if (Prefs.afterScreenOff(c) && (due || retry)) {
+                        // Only possible while the phone hasn't locked itself yet.
+                        if (!getSystemService(KeyguardManager::class.java).isKeyguardLocked) {
+                            startHidden(change = due)
+                            return
+                        }
+                        Log.w(TAG, "Already locked at screen off: the colours can't be updated now " +
+                            "(turn off 'Lock instantly with side button', set 'Lock automatically' to 5 s or more)")
+                    }
+                    if (due) prepareWallpaper()
+                }
                 // Never start the colour update at unlock: it waits for the home
                 // screen to sit idle, so it can't cut into what you're doing.
                 Intent.ACTION_USER_PRESENT ->
@@ -137,6 +171,7 @@ class PaletteService : AccessibilityService() {
             runCatching { contentResolver.registerContentObserver(uri, false, themeObserver) }
                 .onFailure { Log.w(TAG, "Cannot watch $uri", it) }
         }
+        runCatching { WallpaperManager.getInstance(this).addOnColorsChangedListener(coloursListener, main) }
         Log.i(TAG, "Service connected (home screen: $launcher)")
     }
 
@@ -150,6 +185,8 @@ class PaletteService : AccessibilityService() {
         instance = null
         runCatching { unregisterReceiver(screenReceiver) }
         runCatching { contentResolver.unregisterContentObserver(themeObserver) }
+        runCatching { WallpaperManager.getInstance(this).removeOnColorsChangedListener(coloursListener) }
+        screenLock?.let { if (it.isHeld) it.release() }
         hideOverlay()
         super.onDestroy()
     }
@@ -174,6 +211,57 @@ class PaletteService : AccessibilityService() {
                     // A new picture deserves a run even if the last one failed recently.
                     if (set) lastAttempt = 0L
                     armIdleHome()
+                }
+            }
+        }.start()
+    }
+
+    /**
+     * Screen just turned off and the phone is not locked yet: wake it again behind a
+     * black cover, change the picture if [change], update the colours, then lock.
+     * Nothing shows, and nothing the user is doing gets interrupted.
+     */
+    private fun startHidden(change: Boolean) {
+        val power = getSystemService(PowerManager::class.java)
+        val keyguard = getSystemService(KeyguardManager::class.java)
+        hidden = true
+        preparing = true
+        val run = ++hiddenRun
+        // Counts as an attempt, so a run that can't even start isn't retried at every screen off.
+        lastAttempt = System.currentTimeMillis()
+        val colours = colourEvents
+        Log.i(TAG, "Hidden run after screen off (new picture: $change)")
+        // The cover first, so it is what the screen comes back on with.
+        showOverlay(black = true)
+        @Suppress("DEPRECATION")
+        screenLock = power.newWakeLock(
+            PowerManager.SCREEN_DIM_WAKE_LOCK or PowerManager.ACQUIRE_CAUSES_WAKEUP, "Chameleon:hidden"
+        ).apply { acquire(HIDDEN_MAX_MS) }
+        Thread {
+            val set = change && Wallpapers.setNextFavourite(this) != null
+            if (set) Prefs.setPalettePending(this, true)
+            main.post {
+                if (run != hiddenRun || !hidden) return@post
+                preparing = false
+                if (!Prefs.palettePending(this)) { finish(success = false); return@post }
+                // One UI offers colours for the new picture only once the system has
+                // worked them out, with the screen on.
+                waitUntil({ power.isInteractive && (!set || colourEvents > colours) }, HIDDEN_READY_MAX_MS) { ready ->
+                    Log.i(TAG, "Hidden run: screen on=${power.isInteractive}, locked=${keyguard.isKeyguardLocked}, colours ready=$ready")
+                    later(HIDDEN_SETTLE_MS) {
+                        step = Step.IDLE
+                        when {
+                            !power.isInteractive -> {
+                                Log.w(TAG, "The screen did not turn on (allow Chameleon in Special access > Turn screen on)")
+                                finish(success = false, relock = false)
+                            }
+                            keyguard.isKeyguardLocked -> {
+                                Log.w(TAG, "The phone locked before the colours could be updated")
+                                finish(success = false)
+                            }
+                            else -> refreshPalette()
+                        }
+                    }
                 }
             }
         }.start()
@@ -213,7 +301,7 @@ class PaletteService : AccessibilityService() {
         main.removeCallbacks(beat)
         main.postDelayed(beat, 700)
         main.postDelayed(timeout, FLOW_TIMEOUT_MS)
-        if (Prefs.hideFlash(this)) showOverlay()
+        if (hidden || Prefs.hideFlash(this)) showOverlay(black = hidden)
         try {
             startActivity(launch)
         } catch (e: Exception) {
@@ -239,6 +327,8 @@ class PaletteService : AccessibilityService() {
 
     private fun homeRunAllowed() =
         step == Step.IDLE && !preparing && Prefs.enabled(this) && Prefs.palettePending(this) &&
+            // With the screen-off option the colours never cut into the home screen.
+            !Prefs.afterScreenOff(this) &&
             System.currentTimeMillis() - lastAttempt >= RETRY_MS
 
     /** (Re)starts the countdown to a colour update, if one is waiting. */
@@ -388,12 +478,32 @@ class PaletteService : AccessibilityService() {
         }
     }
 
-    private fun finish(success: Boolean) {
+    /** [relock]: after a hidden run, lock the phone again (not if the user took over). */
+    private fun finish(success: Boolean, relock: Boolean = true) {
         main.removeCallbacks(timeout)
         pending?.let { main.removeCallbacks(it) }
         step = Step.IDLE
         if (success) Prefs.setPalettePending(this, false)
         leaveWallpaperAndStyle()
+        if (hidden) {
+            hidden = false
+            preparing = false
+            hiddenRun++
+            screenLock?.let { if (it.isHeld) it.release() }
+            screenLock = null
+            if (relock) {
+                // Once the BACK above has landed, switch the screen off for real. The
+                // cover goes when the screen is off (or after 2 s if it won't lock).
+                main.postDelayed({
+                    selfLock = true
+                    main.postDelayed(selfLockExpired, 2000)
+                    if (!performGlobalAction(GLOBAL_ACTION_LOCK_SCREEN)) Log.w(TAG, "Could not lock the screen")
+                }, 900)
+                return
+            }
+            main.postDelayed(hideRunnable, 350)
+            return
+        }
         // One UI re-themes the home screen icons a moment after Apply; keep the
         // cover up until that has finished so the icons don't change in patches.
         main.postDelayed(hideRunnable, if (success) ICONS_SETTLE_MS else 350)
@@ -476,24 +586,38 @@ class PaletteService : AccessibilityService() {
     // --- overlay ------------------------------------------------------------
 
     /** Covers the screen with the new wallpaper while the taps run underneath. */
-    private fun showOverlay() {
+    private fun showOverlay(black: Boolean = false) {
         main.removeCallbacks(hideRunnable) // a new run cancels a pending hide
+        main.removeCallbacks(selfLockExpired)
+        selfLock = false
         if (overlay != null) return
-        val view = FrameLayout(this).apply {
-            setBackgroundColor(Color.BLACK)
-            // Escape hatch: a tap abandons the flow and uncovers the screen.
-            setOnClickListener { Log.i(TAG, "Cancelled by tap"); finish(success = false) }
+        val hint = TextView(this)
+        val view = FrameLayout(this).apply { setBackgroundColor(Color.BLACK) }
+        // Escape hatch: a tap abandons the flow and uncovers the screen. A hidden run
+        // first only says what is going on (the screen looks off), in case of a stray touch.
+        view.setOnClickListener {
+            if (black && hint.visibility != View.VISIBLE) {
+                hint.visibility = View.VISIBLE
+                (view.layoutParams as? WindowManager.LayoutParams)?.let { lp ->
+                    lp.screenBrightness = WindowManager.LayoutParams.BRIGHTNESS_OVERRIDE_NONE
+                    runCatching { getSystemService(WindowManager::class.java).updateViewLayout(view, lp) }
+                }
+                return@setOnClickListener
+            }
+            Log.i(TAG, "Cancelled by tap")
+            finish(success = false, relock = false)
         }
         val preview = Wallpapers.previewFile(this)
-        if (preview.exists()) {
+        if (!black && preview.exists()) {
             view.addView(ImageView(this).apply {
                 scaleType = ImageView.ScaleType.CENTER_CROP
                 setImageBitmap(BitmapFactory.decodeFile(preview.path))
             })
         }
         view.addView(
-            TextView(this).apply {
-                text = "Matching colours…  tap to cancel"
+            hint.apply {
+                text = if (black) "Matching colours…  tap again to use the phone" else "Matching colours…  tap to cancel"
+                if (black) visibility = View.INVISIBLE
                 setTextColor(Color.WHITE)
                 setShadowLayer(8f, 0f, 0f, Color.BLACK)
                 textSize = 15f
@@ -515,6 +639,13 @@ class PaletteService : AccessibilityService() {
         ).apply {
             layoutInDisplayCutoutMode =
                 WindowManager.LayoutParams.LAYOUT_IN_DISPLAY_CUTOUT_MODE_ALWAYS
+            if (black) {
+                // Black at minimum brightness: on an OLED the screen looks switched off.
+                screenBrightness = 0f
+                @Suppress("DEPRECATION")
+                flags = flags or WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON or
+                    WindowManager.LayoutParams.FLAG_TURN_SCREEN_ON
+            }
         }
         runCatching {
             getSystemService(WindowManager::class.java).addView(view, lp)
@@ -579,6 +710,10 @@ class PaletteService : AccessibilityService() {
         /** Quiet time needed after the palette went off, while the screen redraws. */
         const val SETTLE_MS = 800L
         const val RETRY_MS = 10 * 60_000L
+        /** Hidden run: the longest the screen is kept on, the wait for the new picture's colours, and a pause before starting. */
+        const val HIDDEN_MAX_MS = 45_000L
+        const val HIDDEN_READY_MAX_MS = 5_000L
+        const val HIDDEN_SETTLE_MS = 1_500L
         const val DRESSROOM = "com.samsung.android.app.dressroom"
         var instance: PaletteService? = null
             private set

@@ -27,6 +27,7 @@ object Prefs {
     private const val KEY_QUEUE = "queue"
     private const val KEY_HIDE_FLASH = "hide_flash"
     private const val KEY_PALETTE_PENDING = "palette_pending"
+    private const val KEY_AFTER_SCREEN_OFF = "after_screen_off"
 
     private fun p(c: Context) = c.getSharedPreferences(FILE, Context.MODE_PRIVATE)
 
@@ -44,6 +45,10 @@ object Prefs {
 
     fun hideFlash(c: Context) = p(c).getBoolean(KEY_HIDE_FLASH, true)
     fun setHideFlash(c: Context, v: Boolean) = p(c).edit().putBoolean(KEY_HIDE_FLASH, v).apply()
+
+    /** Update the colours right after screen off, behind a black cover, instead of on the home screen. */
+    fun afterScreenOff(c: Context) = p(c).getBoolean(KEY_AFTER_SCREEN_OFF, false)
+    fun setAfterScreenOff(c: Context, v: Boolean) = p(c).edit().putBoolean(KEY_AFTER_SCREEN_OFF, v).apply()
 
     fun lastChange(c: Context) = p(c).getLong(KEY_LAST_CHANGE, 0L)
     fun lastId(c: Context) = p(c).getLong(KEY_LAST_ID, -1L)

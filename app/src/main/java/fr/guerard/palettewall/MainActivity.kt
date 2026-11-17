@@ -96,9 +96,16 @@ class MainActivity : Activity() {
         val options = section(col, "Behaviour")
         options.addView(switchRow(
             "Change automatically",
-            "Picture at screen off, colours when the home screen is idle",
+            "Picture at screen off, colours when the home screen is idle (or right after screen off, below)",
             Prefs.enabled(this)
         ) { Prefs.setEnabled(this, it) })
+        options.addView(switchRow(
+            "Colours right after screen off",
+            "Nothing to see and nothing interrupted: the screen stays black a few seconds longer, then locks. " +
+                "Needs Lock screen > Secure lock settings: 'Lock instantly with side button' off and " +
+                "'Lock automatically' at 5 seconds or more",
+            Prefs.afterScreenOff(this)
+        ) { Prefs.setAfterScreenOff(this, it) })
         options.addView(switchRow(
             "Also set the lock screen", null, Prefs.lockToo(this)
         ) { Prefs.setLockToo(this, it) })

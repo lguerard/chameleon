@@ -42,7 +42,19 @@ makes One UI's colour palette follow each picture.
   configuration change) instead of trusting the greyed-out button, since turning
   the palette back on too soon after "off" is lost and leaves the default colours;
   20 s timeout (tap to cancel); then back out of Wallpaper and style (home only as a fallback) and remove the overlay.
-- Options in the app: auto on/off, lock screen too, icons too, hide flash,
+- Option "Colours right after screen off" (off by default, **not yet verified on
+  the phone**): instead of the home-screen run, at screen off (when a change is
+  due, or a palette is still pending and the last attempt is 10 min old) and only
+  if the keyguard has not locked yet, `startHidden` wakes the screen behind a
+  black, minimum-brightness cover (looks off on the OLED), sets the picture, waits
+  for the system's new wallpaper colours, runs the same palette flow, then locks
+  with `GLOBAL_ACTION_LOCK_SCREEN`. Needs Secure lock settings: "Lock instantly
+  with side button" off and "Lock automatically" ≥ 5 s, and the `TURN_SCREEN_ON`
+  special access. A first touch on the cover shows a hint, a second one cancels;
+  the user's own power press aborts. With the option on, nothing ever runs on the
+  home screen. A palette change restarts whatever app is in front (configuration
+  change), so running it inside an app or a pop-up window is not an alternative.
+- Options in the app: auto on/off, colours right after screen off, lock screen too, icons too, hide flash,
   interval; buttons "Change wallpaper now" and "Only re-apply the palette".
 
 ## Build

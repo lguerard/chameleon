@@ -5,6 +5,8 @@
     <uses-permission android:name="android.permission.SET_WALLPAPER" />
     <!-- Keeps the CPU awake while the wallpaper is set after the screen turns off -->
     <uses-permission android:name="android.permission.WAKE_LOCK" />
+    <!-- "Colours right after screen off": wakes the screen behind a black cover -->
+    <uses-permission android:name="android.permission.TURN_SCREEN_ON" />
     <!-- Samsung's Wallpaper and style screen requires this to be opened.
          It cannot be granted in the UI, only once with:
          adb shell pm grant fr.guerard.palettewall android.permission.WRITE_SECURE_SETTINGS -->
